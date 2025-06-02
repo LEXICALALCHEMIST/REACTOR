@@ -4,8 +4,11 @@ import 'webrtc-adapter';
 import './index.css';
 import Register from './components/register/Register.jsx';
 import SignIn from './components/register/SignIn.jsx';
-import { Cube } from './ZM/MORPHCUBE/cube.js';
-import { SYMBOL_SEQUENCE } from './ZM/core/SacredSymbols.js';
+import { send } from '../src/ZM/ZTRL/send.js';
+import { update } from '../src/ZM/ZTRL/update.js';
+import { Cube } from '../src/ZM/MORPHCUBE/cube.js';
+import { SYMBOL_SEQUENCE } from '../src/ZM/core/SacredSymbols.js';
+
 
 // Polyfill for global (required for simple-peer in browser)
 if (typeof window !== 'undefined') {
@@ -26,22 +29,11 @@ function App() {
   const retryCountRef = useRef(0); // Track retry attempts
   const maxRetries = 5;
   const initialRetryDelay = 2000; // 2 seconds
-  const isMountedRef = useRef(true); // Track if component is mounted
 
   // Function to connect to WebSocket with retry logic
   const connectWebSocket = (retryDelay = initialRetryDelay) => {
-    if (!isMountedRef.current) {
-      console.log('Component unmounted, stopping WebSocket connection attempts');
-      return;
-    }
-
     if (isConnectingRef.current) {
       console.log('WebSocket connection already in progress, skipping...');
-      return;
-    }
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      console.log('WebSocket already connected, skipping...');
       return;
     }
 
@@ -51,7 +43,6 @@ function App() {
     wsRef.current = socket;
 
     socket.onopen = () => {
-      if (!isMountedRef.current) return;
       console.log('Connected to NEUROM WebSocket server');
       setWs(socket);
       retryCountRef.current = 0; // Reset retry count on successful connection
@@ -68,7 +59,6 @@ function App() {
     };
 
     socket.onmessage = (event) => {
-      if (!isMountedRef.current) return;
       const data = JSON.parse(event.data);
       console.log('Message from NEUROM:', data);
 
@@ -87,7 +77,6 @@ function App() {
     };
 
     socket.onclose = () => {
-      if (!isMountedRef.current) return;
       console.log('Disconnected from NEUROM WebSocket server');
       setWs(null);
       isConnectingRef.current = false;
@@ -96,7 +85,6 @@ function App() {
         const delay = retryDelay * Math.pow(2, retryCountRef.current); // Exponential backoff
         console.log(`Retrying WebSocket connection in ${delay/1000} seconds... (Attempt ${retryCountRef.current + 1}/${maxRetries})`);
         setTimeout(() => {
-          if (!isMountedRef.current) return;
           retryCountRef.current += 1;
           connectWebSocket(retryDelay);
         }, delay);
@@ -106,27 +94,17 @@ function App() {
     };
 
     socket.onerror = (error) => {
-      if (!isMountedRef.current) return;
       console.error('WebSocket error:', error);
       isConnectingRef.current = false;
     };
   };
 
-  // Establish WebSocket connection on app load with initial delay
+  // Establish WebSocket connection on app load
   useEffect(() => {
-    isMountedRef.current = true;
-
-    // Delay initial connection to ensure NEUROM server is ready
-    const timer = setTimeout(() => {
-      if (isMountedRef.current) {
-        connectWebSocket();
-      }
-    }, 1000); // 1-second delay
+    connectWebSocket();
 
     // Cleanup on unmount
     return () => {
-      clearTimeout(timer);
-      isMountedRef.current = false;
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
