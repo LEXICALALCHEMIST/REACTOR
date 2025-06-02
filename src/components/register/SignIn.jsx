@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import CryptoJS from 'crypto-js';
 
-function SignIn({ onSignIn }) {
+function SignIn({ onSignIn, ws }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,6 +21,19 @@ function SignIn({ onSignIn }) {
     // Verify credentials
     if (storedUser.name === name && storedUser.password === hashedPassword) {
       setError('');
+
+      // Register device with NEUROM on sign-in
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'register',
+          did: storedUser.id,
+          userData: storedUser
+        }));
+      } else {
+        setError('Failed to connect to NEUROM. Please try again.');
+        return;
+      }
+
       onSignIn(storedUser);
     } else {
       setError('Invalid name or password.');
