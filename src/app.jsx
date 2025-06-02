@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import SimplePeer from 'simple-peer';
+import 'webrtc-adapter';
 import './index.css';
-import Register from './Register.jsx';
-import SignIn from './SignIn.jsx';
+import Register from './components/register/Register.jsx';
+import SignIn from './components/register/SignIn.jsx';
+import { Cube } from './ZM/MORPHCUBE/cube.js';
+import { SYMBOL_SEQUENCE } from './ZM/core/SacredSymbols.js';
+
+// Polyfill for global (required for simple-peer in browser)
+if (typeof window !== 'undefined') {
+  window.global = window.global || window;
+  window.process = window.process || { env: {} };
+}
 
 function App() {
   const [user, setUser] = useState(null);
@@ -12,17 +21,54 @@ function App() {
   const [amount, setAmount] = useState('');
   const [peer, setPeer] = useState(null);
   const [error, setError] = useState('');
+  const wsRef = useRef(null); // Track WebSocket instance
+  const isConnectingRef = useRef(false); // Prevent overlapping connections
+  const retryCountRef = useRef(0); // Track retry attempts
+  const maxRetries = 5;
+  const initialRetryDelay = 2000; // 2 seconds
+  const isMountedRef = useRef(true); // Track if component is mounted
 
-  // Establish WebSocket connection to NEUROM on app load
-  useEffect(() => {
+  // Function to connect to WebSocket with retry logic
+  const connectWebSocket = (retryDelay = initialRetryDelay) => {
+    if (!isMountedRef.current) {
+      console.log('Component unmounted, stopping WebSocket connection attempts');
+      return;
+    }
+
+    if (isConnectingRef.current) {
+      console.log('WebSocket connection already in progress, skipping...');
+      return;
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected, skipping...');
+      return;
+    }
+
+    isConnectingRef.current = true;
+    console.log('Attempting to connect to NEUROM WebSocket server...');
     const socket = new WebSocket('ws://localhost:8080');
-    
+    wsRef.current = socket;
+
     socket.onopen = () => {
+      if (!isMountedRef.current) return;
       console.log('Connected to NEUROM WebSocket server');
       setWs(socket);
+      retryCountRef.current = 0; // Reset retry count on successful connection
+      isConnectingRef.current = false;
+
+      // If user is already logged in, re-register the device on reconnect
+      if (user) {
+        socket.send(JSON.stringify({
+          type: 'register',
+          did: user.id,
+          userData: user
+        }));
+      }
     };
 
     socket.onmessage = (event) => {
+      if (!isMountedRef.current) return;
       const data = JSON.parse(event.data);
       console.log('Message from NEUROM:', data);
 
@@ -30,8 +76,9 @@ function App() {
         console.log(`Device registered with DID: ${data.did}`);
       } else if (data.type === 'found') {
         console.log(`Device found: ${data.did} at ${data.ip}:${data.port}`);
-        // Initiate WebRTC P2P connection
-        initiatePeerConnection(data.ip, data.port);
+        initiatePeerConnection(data.ip, data.port, true); // Initiator
+      } else if (data.type === 'signal') {
+        initiatePeerConnection(null, null, false, data.signalData); // Receiver
       } else if (data.type === 'not-found') {
         setError(`Device not found: ${data.did}`);
       } else if (data.type === 'error') {
@@ -40,18 +87,53 @@ function App() {
     };
 
     socket.onclose = () => {
+      if (!isMountedRef.current) return;
       console.log('Disconnected from NEUROM WebSocket server');
       setWs(null);
+      isConnectingRef.current = false;
+
+      if (retryCountRef.current < maxRetries) {
+        const delay = retryDelay * Math.pow(2, retryCountRef.current); // Exponential backoff
+        console.log(`Retrying WebSocket connection in ${delay/1000} seconds... (Attempt ${retryCountRef.current + 1}/${maxRetries})`);
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          retryCountRef.current += 1;
+          connectWebSocket(retryDelay);
+        }, delay);
+      } else {
+        setError('Failed to connect to NEUROM after maximum retries. Please ensure NEUROM is running.');
+      }
     };
 
     socket.onerror = (error) => {
+      if (!isMountedRef.current) return;
       console.error('WebSocket error:', error);
+      isConnectingRef.current = false;
     };
+  };
 
+  // Establish WebSocket connection on app load with initial delay
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Delay initial connection to ensure NEUROM server is ready
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) {
+        connectWebSocket();
+      }
+    }, 1000); // 1-second delay
+
+    // Cleanup on unmount
     return () => {
-      socket.close();
+      clearTimeout(timer);
+      isMountedRef.current = false;
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+      isConnectingRef.current = false;
+      retryCountRef.current = 0;
     };
-  }, []);
+  }, []); // Run only once on mount
 
   // Check LocalStorage for existing user on app load
   useEffect(() => {
@@ -75,10 +157,10 @@ function App() {
     setPeer(null);
   };
 
-  const initiatePeerConnection = (ip, port) => {
+  const initiatePeerConnection = (ip, port, isInitiator, signalData) => {
     // Create a WebRTC peer connection using simple-peer
     const p = new SimplePeer({
-      initiator: true,
+      initiator: isInitiator,
       trickle: false,
       config: {
         iceServers: [
@@ -87,12 +169,17 @@ function App() {
       }
     });
 
+    // Handle incoming signaling data (for receiver)
+    if (!isInitiator && signalData) {
+      p.signal(signalData);
+    }
+
     // Handle WebRTC signaling data (send to target via NEUROM)
     p.on('signal', (signalData) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: 'signal',
-          targetDid,
+          targetDid: isInitiator ? targetDid : user.morphAddress, // For initiator: targetDid; for receiver: self
           signalData
         }));
       }
@@ -100,23 +187,44 @@ function App() {
 
     // Handle connection establishment
     p.on('connect', () => {
-      console.log(`Connected to peer: ${targetDid}`);
+      console.log(`Connected to peer: ${isInitiator ? targetDid : 'unknown initiator'}`);
       setPeer(p);
 
-      // Send LSD transaction to the target device
-      const transaction = {
-        intent: 'PUSH',
-        value: parseInt(amount),
-        morphPin: '◇◇●●',
-        target: targetDid
-      };
-      p.send(JSON.stringify(transaction));
-      setError(`Sent ${amount} LSD to ${targetDid}`);
+      if (isInitiator) {
+        // Send LSD transaction to the target device
+        const transaction = {
+          intent: 'PUSH',
+          value: parseInt(amount),
+          morphPin: '◇◇●●',
+          target: targetDid
+        };
+        p.send(JSON.stringify(transaction));
+        setError(`Sent ${amount} LSD to ${targetDid}`);
+      }
     });
 
-    // Handle incoming data (e.g., confirmation from target)
-    p.on('data', (data) => {
+    // Handle incoming data (e.g., transaction or confirmation)
+    p.on('data', async (data) => {
       console.log('Received data from peer:', data.toString());
+      try {
+        const transaction = JSON.parse(data.toString());
+        if (transaction.intent === 'PUSH') {
+          // Process the incoming LSD transaction using Cube
+          const cube = new Cube(user);
+          const newSkeletonJson = await cube.receiveRequest(transaction.value, transaction.morphPin);
+
+          // Update user's currentSKEL with the new value
+          const newSkeleton = JSON.parse(newSkeletonJson);
+          const newValue = parseInt(newSkeleton.units.slice(0, newSkeleton.numberLength).map(u => SYMBOL_SEQUENCE.indexOf(u.currentSymbol)).join('') || '0', 10);
+          const updatedUser = { ...user, currentSKEL: newValue };
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          setUser(updatedUser);
+          setError(`Received ${transaction.value} LSD from peer`);
+        }
+      } catch (err) {
+        console.error('Failed to process incoming transaction:', err);
+        setError('Failed to process incoming transaction.');
+      }
     });
 
     p.on('error', (err) => {
@@ -127,7 +235,7 @@ function App() {
 
   const handleSend = () => {
     if (!targetDid || !amount) {
-      setError('Please enter a target DID and amount.');
+      setError('Please enter a target MorphAddress and amount.');
       return;
     }
 
@@ -171,12 +279,15 @@ function App() {
         Welcome, {user.name}! Your current LSD balance: {user.currentSKEL}
       </p>
       <p className="note">
+        Your MorphAddress: {user.morphAddress}
+      </p>
+      <p className="note">
         This app will handle LSD transfers via ZTRL and mesh routing to Chronos via NEUROM.
       </p>
       {error && <p className="text-red-500">{error}</p>}
       <div>
         <label>
-          Target DID:
+          Target MorphAddress:
           <input
             type="text"
             value={targetDid}

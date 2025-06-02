@@ -18,12 +18,13 @@ function Register({ onRegister, ws }) {
     // Hash the password using CryptoJS
     const hashedPassword = CryptoJS.SHA256(password).toString();
 
-    // Create user object with initial skeleton value
+    // Create user object with initial skeleton value and morphAddress
     const user = {
       id: did,
       name,
       password: hashedPassword,
-      currentSKEL: 6483 // Initial balance, same as testUser.js
+      currentSKEL: 6483, // Initial balance, same as testUser.js
+      morphAddress: did // Use DID as the morphAddress for now
     };
 
     // Store user in LocalStorage
