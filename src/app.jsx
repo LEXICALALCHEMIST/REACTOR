@@ -39,7 +39,7 @@ function App() {
 
     isConnectingRef.current = true;
     console.log('Attempting to connect to NEUROM WebSocket server...');
-    const socket = new WebSocket('ws://localhost:8080');
+const socket = new WebSocket('ws://192.168.1.166:8080');
     wsRef.current = socket;
 
     socket.onopen = () => {
