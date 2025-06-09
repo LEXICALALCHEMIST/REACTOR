@@ -3,53 +3,44 @@ import PushModule from '../MorphLogic/PushModule.js';
 import { Signal } from '../ZTRL/signal.js';
 import { SYMBOL_SEQUENCE } from '../core/SacredSymbols.js';
 
-class Cube {
+console.log('MorphCube Initialized');
+
+export class Cube {
   constructor(user) {
-    this.currentSKEL = user.currentSKEL;
-    this.skeleton = new SkeletonInitializer(this.currentSKEL);
-    this.pushModule = new PushModule(this.skeleton);
+    this.user = user;
+    this.skeleton = null;
+    this.signal = new Signal(); // Initialize Signal for ZTRL integration
+    this.initializeSkeleton(); // Initialize skeleton with user's currentSKEL
   }
 
-  receiveRequest(value, morphPin) {
-    return new Promise((resolve, reject) => {
-      try {
-        const signal = new Signal();
-        signal.receiveRequest(value, morphPin).then((morphOp) => {
-          this.morph(morphOp).then((newSkeletonJson) => {
-            resolve(newSkeletonJson);
-          }).catch(reject);
-        }).catch(reject);
-      } catch (error) {
-        reject(error);
-      }
-    });
+  // Initialize the skeleton with the user's currentSKEL
+  async initializeSkeleton() {
+    if (!this.skeleton) {
+      this.skeleton = new SkeletonInitializer();
+      await this.skeleton.set(this.user.currentSKEL, true); // Use set as skeletonInitialize
+      console.log(`Cube: Skeleton initialized with value: ${this.user.currentSKEL} for user: ${JSON.stringify(this.user)}`);
+    }
+    return this.skeleton;
   }
 
-  morph(morphOp) {
-    return new Promise((resolve, reject) => {
-      try {
-        console.log('Cube: Processing morphOp - PUSH', morphOp.VALUE, 'to recipient\'s skeleton');
-        this.skeleton = new SkeletonInitializer(this.currentSKEL);
-        console.log('Cube morph: Skeleton initialized with value:', this.currentSKEL);
-        this.pushModule = new PushModule(this.skeleton);
-        this.pushModule.applyPush(morphOp.VALUE);
-        const newSkeletonJson = this.skeleton.toJSON();
-        console.log('Cube morph: Updated skeleton JSON after pushing', morphOp.VALUE, ':', newSkeletonJson);
-        this.currentSKEL = parseInt(
-          newSkeletonJson.units
-            .slice(0, newSkeletonJson.numberLength)
-            .map(u => SYMBOL_SEQUENCE.indexOf(u.currentSymbol))
-            .join('') || '0',
-          10
-        );
-        console.log('Cube: Recipient\'s skeleton updated to:', this.currentSKEL);
-        resolve(newSkeletonJson);
-      } catch (error) {
-        console.error('Cube: Failed to process morphOp:', error);
-        reject(error);
-      }
-    });
+  // Intercept MorphOp from poll and log value/intent
+  async interceptMorphOp(morphOp) {
+    if (!morphOp || typeof morphOp !== 'object') {
+      throw new Error('Cube interceptMorphOp: Invalid morphOp format');
+    }
+
+    const { value, intent } = morphOp;
+    console.log('Intercepted MorphOp - Value:', value, 'Intent:', intent);
+
+    // Initialize or reinitialize skeleton if needed
+    await this.initializeSkeleton();
+
+    // For now, log and return current state (no push/pull yet)
+    const skeletonState = this.skeleton.getState();
+    const skeletonDisplay = `<${skeletonState.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${skeletonState.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${skeletonState.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+    console.log(`Current Skeleton State: ${skeletonDisplay}, currentSKEL: ${this.user.currentSKEL}`);
+    return { currentSKEL: this.user.currentSKEL, units: skeletonState.units };
   }
 }
 
-export { Cube };
+export default Cube;
