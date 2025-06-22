@@ -55,8 +55,8 @@ function Login({ setLoggedIn, setUser }) {
         />
       </Form.Group>
 
-      <Button variant="primary" type="submit">
-        Login
+      <Button variant="dark" type="submit">
+        <span className='navbar-logo'>SUBMIT</span>
       </Button>
       {error && <p style={{ color: 'red' }}>{error}</p>}
     </Form>

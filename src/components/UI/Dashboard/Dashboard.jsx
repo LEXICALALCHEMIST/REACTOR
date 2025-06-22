@@ -14,7 +14,7 @@ function Dashboard({ user }) {
 
   return (
     <Container className="dashboard">
-      <h1>Welcome, {user?.username || 'User'}</h1>
+      <h1 className='navbar-logo'>Node: {user?.username || 'User'}</h1>
       <Row>
         <Col md={6}>
           <Card className="mb-4">
