@@ -1,0 +1,23 @@
+.dashboard {
+  padding: 20px;
+}
+
+.dashboard h1 {
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.dashboard .card {
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard .card-header {
+  background-color: #007bff;
+  color: white;
+  font-weight: bold;
+}
+
+.dashboard .card-text {
+  font-size: 1.1em;
+}
