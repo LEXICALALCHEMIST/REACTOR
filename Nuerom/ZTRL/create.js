@@ -9,10 +9,10 @@ export function create(morphOp, callback) {
   console.log('Sending morphOp:', morphOp, 'Token:', token);
   axios
     .post('http://localhost:3001/morph/create', {
-      intent: morphOp.INTENT,
-      value: morphOp.VALUE,
+      intent: morphOp.intent,
+      value: morphOp.value,
       targetMorphId: morphOp.targetMorphId,
-      signature: 'temp-signature'
+      signature: morphOp.signature // Ensured to include signature
     }, {
       headers: { Authorization: `Bearer ${token}` }
     })

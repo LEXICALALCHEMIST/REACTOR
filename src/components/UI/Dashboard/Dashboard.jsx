@@ -4,20 +4,12 @@ import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
 import Card from 'react-bootstrap/Card';
 import Send from '../Send/Send.jsx';
-import { create } from '../../../../Nuerom/ZTRL/create.js'; // Adjust path as needed
 import './Dashboard.css';
 
 function Dashboard({ user }) {
-  const handleSend = (morphOp) => {
-    create(morphOp, (err, data) => {
-      if (err) {
-        alert('Failed to send LSD: ' + err);
-      } else {
-        console.log('MorphOp created:', data.morphOp);
-        alert('LSD sent successfully!');
-        // Optionally refresh user data (e.g., fetch current_skel)
-      }
-    });
+  const handleSendComplete = () => {
+    // Optionally refresh user data (e.g., fetch current_skel)
+    console.log('Send complete, refreshing UI if needed');
   };
 
   return (
@@ -37,7 +29,7 @@ function Dashboard({ user }) {
           <Card className="mb-4">
             <Card.Header>Send LSD</Card.Header>
             <Card.Body>
-              <Send userId={user?.id} onSend={handleSend} />
+              <Send userId={user?.id} onSendComplete={handleSendComplete} />
             </Card.Body>
           </Card>
         </Col>
