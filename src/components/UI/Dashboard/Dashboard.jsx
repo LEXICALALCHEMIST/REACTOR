@@ -4,6 +4,7 @@ import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
 import Card from 'react-bootstrap/Card';
 import Send from '../Send/Send.jsx';
+import Receive from '../Receive/Receive.jsx';
 import './Dashboard.css';
 
 function Dashboard({ user }) {
@@ -31,6 +32,7 @@ function Dashboard({ user }) {
             <Card.Body>
               <Send userId={user?.id} onSendComplete={handleSendComplete} />
             </Card.Body>
+            <Receive userId={user?.id} />
           </Card>
         </Col>
       </Row>
