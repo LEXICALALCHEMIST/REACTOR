@@ -1,0 +1,2412 @@
+REACT0R/
+
+Nuerom/
+User/
+
+logIn.js
+import axios from 'axios';
+
+export function logIn({ username, password }, callback) {
+  axios
+    .post('http://localhost:3001/auth/login', { username, password })
+    .then((response) => {
+      callback(null, response.data); // Pass success data (message, token, user)
+    })
+    .catch((err) => {
+      callback(err.response?.data?.error || 'Login failed', null); // Pass error
+    });
+}
+
+signUp.js
+import axios from 'axios';
+
+export function signup({ username, email, password }, callback) {
+  axios
+    .post('http://localhost:3001/auth/signup', { username, email, password })
+    .then((response) => {
+      callback(null, response.data);
+    })
+    .catch((err) => {
+      callback(err.response?.data?.error || 'Registration failed', null);
+    });
+}
+
+ZTRL/
+
+create.js
+import axios from 'axios';
+
+export function create(morphOp, callback) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    callback(new Error('No authentication token found'), null);
+    return;
+  }
+  console.log('Sending morphOp:', morphOp, 'Token:', token);
+  axios
+    .post('http://localhost:3001/morph/create', {
+      intent: morphOp.intent,
+      value: morphOp.value,
+      targetMorphId: morphOp.targetMorphId,
+      signature: morphOp.signature // Ensured to include signature
+    }, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    .then((response) => {
+      callback(null, response.data); // Pass success data (message, morphOp)
+    })
+    .catch((err) => {
+      console.log('Error response:', err.response?.data);
+      callback(err.response?.data?.error || 'Send failed', null); // Pass error
+    });
+}
+
+getSkel.js
+import axios from 'axios';
+
+export async function getSkel(userId) {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('No authentication token found');
+    const response = await axios.get(`http://localhost:3001/users/${userId}/skel`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data.current_skel; // Assume API returns { current_skel: number }
+  } catch (error) {
+    console.error('getSkel error:', error.message);
+    throw error;
+  }
+}
+
+ignite.js
+import axios from 'axios';
+import { ReceiveCube } from '../MORPHCUBE/rCUBE.js';
+
+export class Ignite {
+  constructor(user) {
+    this.user = user;
+    this.axios = axios.create({ baseURL: 'http://localhost:3001' });
+  }
+
+  async processMorphOps(morphOps) {
+    try {
+      const cube = new ReceiveCube(this.user);
+      const { currentSKEL, newSkeletonJson, pom } = await cube.processMorphOps(morphOps);
+      this.user.currentSKEL = currentSKEL;
+      await this.updateMorphStatus(pom);
+      return { currentSKEL, newSkeletonJson };
+    } catch (error) {
+      throw new Error(`Ignite: Failed to process morphOps: ${error.message}`);
+    }
+  }
+
+  async updateMorphStatus(pom) {
+    await this.axios.post('/morph/update', { pom }, {
+      headers: { Authorization: `Bearer ${this.user.token}` }
+    });
+  }
+}
+
+receive.js
+import axios from 'axios';
+
+export const fetchMorphOps = async (userId) => {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('No authentication token found');
+    const response = await axios.get('http://localhost:3001/morph/pending', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const ops = response.data.morphOps || response.data; // Handle { morphOps: [...] } or raw array
+    return ops;
+  } catch (err) {
+    throw err.response?.data?.error || 'Failed to fetch morphOps';
+  }
+};
+
+singal.js
+import axios from 'axios';
+import Ignite from './ignite.js';
+
+export class Signal {
+  constructor() {
+    this.axios = axios.create({ baseURL: 'http://localhost:3001' });
+  }
+
+  async onLogin(user) {
+    try {
+      const response = await this.axios.get('/morph/pending', {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      const morphOps = response.data.morphOps;
+      const ignite = new Ignite(user);
+      return await ignite.processMorphOps(morphOps);
+    } catch (error) {
+      throw new Error(`Signal: Failed to fetch morphOps: ${error.message}`);
+    }
+  }
+}
+
+update.js 
+import axios from 'axios';
+
+export function update({ userId, newSKEL }, callback) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    callback(new Error('No authentication token found'), null);
+    return;
+  }
+  console.log('Updating skeleton:', { userId, newSKEL }, 'Token:', token);
+  axios
+    .post('http://localhost:3001/users/update-skel', {
+      userId,
+      newSKEL
+    }, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    .then((response) => {
+      callback(null, response.data); // Pass success data
+    })
+    .catch((err) => {
+      console.log('Update error:', err.response?.data);
+      callback(err.response?.data?.error || 'Update failed', null); // Pass error
+    });
+}
+
+src/
+
+components/
+
+UI/
+Dashboard/
+
+Dashboard.jsx
+import React from 'react';
+import Container from 'react-bootstrap/Container';
+import Row from 'react-bootstrap/Row';
+import Col from 'react-bootstrap/Col';
+import Card from 'react-bootstrap/Card';
+import Send from '../Send/Send.jsx';
+import Receive from '../Receive/Receive.jsx';
+import './Dashboard.css';
+
+function Dashboard({ user }) {
+  const handleSendComplete = () => {
+    // Optionally refresh user data (e.g., fetch current_skel)
+    console.log('Send complete, refreshing UI if needed');
+  };
+
+  return (
+    <Container className="dashboard">
+      <h1 className='navbar-logo'>Node: {user?.username || 'User'}</h1>
+      <Row>
+        <Col md={6}>
+          <Card className="mb-4">
+            <Card.Header>Wallet Balance</Card.Header>
+            <Card.Body>
+              <Card.Text>Current Skeleton: {user?.current_skel || 0} LSD</Card.Text>
+              <Card.Text>Morph ID: {user?.morph_id || 'N/A'}</Card.Text>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={6}>
+          <Card className="mb-4">
+            <Card.Header>Send LSD</Card.Header>
+            <Card.Body>
+              <Send userId={user?.id} onSendComplete={handleSendComplete} />
+            </Card.Body>
+            <Receive userId={user?.id} />
+          </Card>
+        </Col>
+      </Row>
+    </Container>
+  );
+}
+
+export default Dashboard;
+
+Dashboard.css
+.dashboard {
+  padding: 20px;
+}
+
+.dashboard h1 {
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.dashboard .card {
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard .card-header {
+  background-color: #007bff;
+  color: white;
+  font-weight: bold;
+}
+
+.dashboard .card-text {
+  font-size: 1.1em;
+}
+
+Login/
+
+Login.jsx
+import React, { useState } from 'react';
+import axios from 'axios';
+import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
+import { logIn } from '../../../../Nuerom/User/logIn.js'; // Adjust path as needed
+
+function Login({ setLoggedIn, setUser }) {
+  const [formData, setFormData] = useState({
+    username: '',
+    password: ''
+  });
+  const [error, setError] = useState('');
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError('');
+    logIn(formData, (err, data) => {
+      if (err) {
+        setError(err);
+      } else {
+        localStorage.setItem('token', data.token); // Store JWT for re-auth
+        setUser(data.user);
+        setLoggedIn(true); // Update App.jsx state
+      }
+    });
+  };
+
+  return (
+    <Form onSubmit={handleSubmit}>
+      <Form.Group className="mb-3" controlId="formBasicUsername">
+        <Form.Label>Username</Form.Label>
+        <Form.Control
+          type="text"
+          name="username"
+          placeholder="Enter username"
+          value={formData.username}
+          onChange={handleChange}
+          required
+        />
+      </Form.Group>
+
+      <Form.Group className="mb-3" controlId="formBasicPassword">
+        <Form.Label>Password</Form.Label>
+        <Form.Control
+          type="password"
+          name="password"
+          placeholder="Password"
+          value={formData.password}
+          onChange={handleChange}
+          required
+        />
+      </Form.Group>
+
+      <Button variant="dark" type="submit">
+        <span className='navbar-logo'>SUBMIT</span>
+      </Button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </Form>
+  );
+}
+
+export default Login;
+
+Navbar/
+
+navbar.jsx
+import Container from 'react-bootstrap/Container';
+import Navbar from 'react-bootstrap/Navbar';
+
+function NavBar() {
+  return (
+    <Navbar bg="dark" variant="dark" className="mb-4">
+      <Container>
+        <Navbar.Brand href="#home"><span className='navbar-logo'>C | L</span></Navbar.Brand>
+        <Navbar.Toggle aria-controls="basic-navbar-nav" color='white'/>
+        <Navbar.Collapse id="basic-navbar-nav">
+          {/* Add any additional navigation items here if needed */}
+        </Navbar.Collapse>
+      </Container>
+    </Navbar>
+  );
+}
+export default NavBar;
+
+Receive/
+
+Receive.jsx
+import React, { useState, useEffect } from 'react';
+import { fetchMorphOps } from '../../../../Nuerom/ZTRL/receive.js'; // Adjust path
+import Card from 'react-bootstrap/Card';
+import ListGroup from 'react-bootstrap/ListGroup';
+import Button from 'react-bootstrap/Button';
+import { rCUBE } from '../../../../ZM/MORPHCUBE/rCUBE.js'; // Placeholder import
+
+function Receive({ userId }) {
+  const [morphOps, setMorphOps] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadMorphOps = async () => {
+      try {
+        const ops = await fetchMorphOps(userId);
+        setMorphOps(ops);
+      } catch (err) {
+        setError(err);
+      }
+    };
+    loadMorphOps();
+  }, [userId]);
+
+  const handleProcess = (morphOp) => {
+    console.log('CUBE IGNITED');
+    console.log('MorphOp in play:', morphOp);
+    // Placeholder for rCUBE logic
+  };
+
+  return (
+    <Card>
+      <Card.Header>Pending Morph Operations</Card.Header>
+      <Card.Body>
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+        <ListGroup>
+          {morphOps.map((morphOp) => (
+            <ListGroup.Item key={morphOp.id}>
+              ID: {morphOp.id}, Value: {morphOp.value}, Target: {morphOp.target_id || morphOp.targetMorphId}
+              <Button variant="primary" className="ms-2" onClick={() => handleProcess(morphOp)}>Process</Button>
+            </ListGroup.Item>
+          ))}
+        </ListGroup>
+      </Card.Body>
+    </Card>
+  );
+}
+
+export default Receive;
+
+Receive.css
+
+Registration/
+
+Register.jsx
+import { useState } from 'react';
+import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
+import Container from 'react-bootstrap/Container';
+import { signup } from '../../../../Nuerom/User/signUp.js'; // Adjust path as needed
+
+function Register({ setLoggedIn, setUser }) {
+  const [formData, setFormData] = useState({
+    username: '',
+    email: '',
+    password: ''
+  });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    signup(formData, (err, data) => {
+      if (err) {
+        setError(err);
+      } else {
+        setSuccess(data.message);
+        if (data.user) {
+          setUser(data.user);
+          setLoggedIn(true); // Trigger login state change
+          // Optionally store token: localStorage.setItem('token', data.token);
+        }
+      }
+    });
+  };
+
+  return (
+    <Container>
+      <h1>Register</h1>
+      <Form onSubmit={handleSubmit}>
+        <Form.Group className="mb-3" controlId="formBasicUsername">
+          <Form.Label>Username</Form.Label>
+          <Form.Control
+            type="text"
+            name="username"
+            placeholder="Enter username"
+            value={formData.username}
+            onChange={handleChange}
+            required
+          />
+        </Form.Group>
+
+        <Form.Group className="mb-3" controlId="formBasicEmail">
+          <Form.Label>Email address</Form.Label>
+          <Form.Control
+            type="email"
+            name="email"
+            placeholder="Enter email"
+            value={formData.email}
+            onChange={handleChange}
+            required
+          />
+          <Form.Text className="text-muted">
+            We'll never share your email with anyone else.
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3" controlId="formBasicPassword">
+          <Form.Label>Password</Form.Label>
+          <Form.Control
+            type="password"
+            name="password"
+            placeholder="Password"
+            value={formData.password}
+            onChange={handleChange}
+            required
+          />
+        </Form.Group>
+
+        <Button variant="primary" type="submit">
+          Submit
+        </Button>
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+        {success && <p style={{ color: 'green' }}>{success}</p>}
+      </Form>
+    </Container>
+  );
+}
+
+export default Register;
+
+Register.css
+.register-form {
+  max-width: 400px;
+  margin: 20px auto;
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+}
+
+.register-form .mb-3 {
+  margin-bottom: 1rem !important;
+}
+
+.register-form .form-control {
+  border-radius: 4px;
+}
+
+.register-form .btn-primary {
+  width: 100%;
+  border-radius: 4px;
+}
+
+.register-form .text-muted {
+  font-size: 0.9em;
+}
+
+Send/
+
+Send.jsx
+import React, { useState } from 'react';
+import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
+import { v4 as uuidv4 } from 'uuid'; // For morphId generation
+import { create } from '../../../../Nuerom/ZTRL/create.js'; // Adjust path as needed
+import { getSkel } from '../../../../Nuerom/ZTRL/getSkel.js'; // Added for skeleton fetch
+import { sCUBE } from '../../../../ZM/MORPHCUBE/sCUBE.js'; // Added for cube integration
+
+
+function Send({ userId, onSendComplete }) {
+  const [formData, setFormData] = useState({
+    targetMorphId: '',
+    value: ''
+  });
+  const [error, setError] = useState('');
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    const value = parseInt(formData.value, 10);
+    if (isNaN(value) || value <= 0) {
+      setError('Value must be a positive number');
+      return;
+    }
+    if (!formData.targetMorphId) {
+      setError('Target Morph ID is required');
+      return;
+    }
+    try {
+      const currentSKEL = await getSkel(userId); // Fetch current skeleton
+      console.log('Current Skeleton:', currentSKEL);
+      const sCube = new sCUBE(currentSKEL, userId); // Pass userId
+      const { newSkeleton, pom } = await sCube.process(value); // Process with cube
+      console.log('Cube Result:', { newSkeleton, pom });
+      const morphOp = {
+        intent: 'PULL', // Required field
+        value: value,   // Required field
+        morphId: uuidv4(),
+        targetMorphId: formData.targetMorphId, // Required field
+        userId: userId,
+        signature: 'temp-signature', // Required field
+        id: null // Placeholder for morphOp.id from create
+      };
+      await create(morphOp, (err, data) => {
+        if (err) {
+          setError(err);
+        } else {
+          console.log('MorphOp created:', data.morphOp);
+          if (onSendComplete) onSendComplete(); // Notify Dashboard
+        }
+      });
+    } catch (error) {
+      setError('Failed to fetch skeleton, process cube, or create morphOp: ' + error.message);
+    }
+  };
+
+  return (
+    <Form onSubmit={handleSubmit}>
+      <Form.Group className="mb-3" controlId="formBasicTargetMorphId">
+        <Form.Label>Target Morph ID</Form.Label>
+        <Form.Control
+          type="text"
+          name="targetMorphId"
+          placeholder="Enter target Morph ID"
+          value={formData.targetMorphId}
+          onChange={handleChange}
+          required
+        />
+      </Form.Group>
+
+      <Form.Group className="mb-3" controlId="formBasicValue">
+        <Form.Label>Value (LSD)</Form.Label>
+        <Form.Control
+          type="number"
+          name="value"
+          placeholder="Enter amount to send"
+          value={formData.value}
+          onChange={handleChange}
+          required
+        />
+      </Form.Group>
+
+      <Button variant="primary" type="submit">
+        Send LSD
+      </Button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </Form>
+  );
+}
+
+export default Send;
+
+App.jsx
+import React, { useState, useEffect } from 'react';
+import './index.css';
+import NavBar from './components/UI/Navbar/navbar.jsx';
+import Register from './components/UI/Registration/Register.jsx';
+import Login from './components/UI/Login/Login.jsx';
+import Dashboard from './components/UI/Dashboard/Dashboard.jsx';
+import axios from 'axios';
+import Tab from 'react-bootstrap/Tab';
+import Tabs from 'react-bootstrap/Tabs';
+import Container from 'react-bootstrap/Container';
+
+
+
+function App() {
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Check for existing JWT on mount
+    const token = localStorage.getItem('token');
+    if (token) {
+      axios
+        .post('http://localhost:3001/auth/login', {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        .then((response) => {
+          setUser(response.data.user);
+          setLoggedIn(true);
+        })
+        .catch(() => {
+          localStorage.removeItem('token');
+          setLoggedIn(false);
+        })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <NavBar />
+      {!loggedIn && (
+        <Container>
+          <Tabs defaultActiveKey="home" id="uncontrolled-tab-example" className="mb-3">
+            <Tab eventKey="home" title="Login">
+              <Login setLoggedIn={setLoggedIn} setUser={setUser} />
+            </Tab>
+            <Tab eventKey="profile" title="Register">
+              <Register setLoggedIn={setLoggedIn} setUser={setUser} />
+            </Tab>
+            <Tab eventKey="contact" title="Reactor" disabled>
+             What is a Reactor?
+            </Tab>
+          </Tabs>
+        </Container>
+      )}
+      {loggedIn && <Dashboard user={user} />}
+    </div>
+  );
+}
+
+export default App;
+
+index.css
+@import url('https://fonts.googleapis.com/css2?family=Smooch+Sans:wght@100..900&display=swap');
+
+.navbar-logo {
+  font-family: 'Smooch Sans', sans-serif;
+  font-weight: 400;
+  font-size: 24px;
+  color: #fff;
+}
+
+main.jsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <App /> // Remove React.StrictMode
+);
+
+ZM/ (ZetaMorph) No Logic Symbolic Math Engine GPU FREE
+
+core/
+
+carryBus.js
+export default class CarryBus {
+  constructor() {
+    this.carryValue = 0;
+    this.carryTarget = null;
+  }
+
+  registerCarry(value, target) {
+    this.carryValue = value;
+    this.carryTarget = target;
+    console.log(`CarryBus: Registered CARRY: ${value} to ${target}`);
+  }
+
+  flushCarry() {
+    const carry = { carryValue: this.carryValue, carryTarget: this.carryTarget };
+    console.log(`CarryBus: Flushed CARRY: ${this.carryValue} to ${this.carryTarget}`);
+    this.carryValue = 0;
+    this.carryTarget = null;
+    return carry;
+  }
+}
+
+MorphInit.js
+import SkeletonInitializer from '../MorphLogic/SkeletonInitializer.js';
+import KeyMaker from '../key/KeyMaker.js';
+import ShiftKey from '../key/ShiftKey.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from './SacredSymbols.js';
+
+export async function morphInit(newNumber, currentSkeletonNumber, isPushOperation = true) {
+  console.log(`morphInit(${newNumber}, ${currentSkeletonNumber})`);
+  
+  const newNumberLength = newNumber.toString().length;
+  const currentSkeletonLength = currentSkeletonNumber.toString().length;
+  
+  let setNumber, keyNumber;
+  
+  // Compare lengths to decide skeleton and key
+  if (newNumberLength > currentSkeletonLength) {
+    setNumber = newNumber; // Larger number for skeleton
+    keyNumber = currentSkeletonNumber; // Smaller number for key
+  } else {
+    setNumber = currentSkeletonNumber; // Keep current skeleton
+    keyNumber = newNumber; // New number for key
+  }
+  
+  // Set skeleton
+  const skeleton = new SkeletonInitializer();
+  await skeleton.set(setNumber, isPushOperation);
+  
+  // Ensure numberLength is set
+  if (!skeleton.state.numberLength) {
+    console.warn(`Warning: skeleton.state.numberLength undefined, setting to ${setNumber.toString().length}`);
+    skeleton.state.numberLength = setNumber.toString().length;
+  }
+  
+  // Generate and shift key
+  const keyMaker = new KeyMaker();
+  const tempKey = keyMaker.makeKey(keyNumber);
+  const shiftKey = new ShiftKey();
+  const shiftedKey = shiftKey.shift(tempKey, skeleton.state.numberLength);
+  
+  // Log results
+  const skeletonState = skeleton.getState();
+  const skeletonDisplay = `<${skeletonState.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${skeletonState.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${skeletonState.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+  console.log(`morphInit: ${newNumber} length ${newNumberLength}, ${currentSkeletonNumber} length ${currentSkeletonLength}: if current is < new number ${newNumber}, set skeleton for: ${setNumber}, genKEY for: ${keyNumber}, new skeleton: ${skeletonDisplay}, new key: ${JSON.stringify(shiftedKey)}`);
+  
+  return { skeleton, key: shiftedKey };
+}
+
+SacredSymbols.js
+export const SYMBOL_SEQUENCE = [
+    '⚙', '●', '○', '□', '¤', '■', '•', '¥', '◇', '▲', '♤'
+  ];
+  
+  export const VOID_SYMBOL = '⊙';
+  
+  console.log('Exporting VOID_SYMBOL:', VOID_SYMBOL);
+
+  key/
+
+  KeyMaker.js
+  import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export default class KeyMaker {
+  makeKey(number) {
+    console.log(`Generating key for ${number}`);
+    
+    const digits = number.toString().split('').map(Number);
+    const length = digits.length;
+    const push = Array(12).fill(null).map((_, i) => {
+      const digit = digits[i];
+      return digit !== undefined ? `U${i + 1}:${digit}` : `U${i + 1}:null`;
+    });
+    
+    const view = push.map(entry => {
+      if (entry.includes('null')) return VOID_SYMBOL;
+      const [, value] = entry.split(':');
+      return SYMBOL_SEQUENCE[parseInt(value)] || VOID_SYMBOL;
+    });
+    
+    const key = {
+      number,
+      length,
+      push,
+      view
+    };
+    
+    console.log(`KEY:${number} LENGTH:${length} PUSH[${push.join(' ')}] VIEW:${view.join('|')}`);
+    return key;
+  }
+}
+
+shiftKey.js (shifts key length to matcgh number lengeth of skeleton)
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export default class ShiftKey {
+  shift(key, targetLength) {
+    console.log(`Shifting key for ${key.number} to targetLength: ${targetLength}`);
+    
+    const oldPush = key.push;
+    console.log(`Shifting key: Old: PUSH[${oldPush.join(', ')}]`);
+    
+    // Default targetLength to key.length if undefined
+    const effectiveTargetLength = targetLength !== undefined ? targetLength : key.length;
+    if (targetLength === undefined) {
+      console.warn(`Warning: targetLength undefined, defaulting to key.length=${key.length}`);
+    }
+    
+    const newPush = Array(12).fill('null').map((_, i) => {
+      const oldIndex = i - (effectiveTargetLength - key.length);
+      if (oldIndex >= 0 && oldIndex < oldPush.length && !oldPush[oldIndex].includes('null')) {
+        const [, value] = oldPush[oldIndex].split(':');
+        return `U${i + 1}:${value}`; // Preserve value, update unit
+      }
+      return `U${i + 1}:null`;
+    });
+    
+    const newView = newPush.map(entry => {
+      if (entry.includes('null')) return VOID_SYMBOL;
+      const [, value] = entry.split(':');
+      return SYMBOL_SEQUENCE[parseInt(value)] || VOID_SYMBOL;
+    });
+    
+    const shiftedKey = {
+      number: key.number,
+      length: key.length,
+      targetLength: effectiveTargetLength,
+      push: newPush,
+      view: newView,
+      targetUnit: `u${effectiveTargetLength}`
+    };
+    
+    console.log(`Shifting key: New: PUSH[${newPush.join(', ')}]`);
+    return shiftedKey;
+  }
+}
+
+MORPHCUBE/
+
+rCUBE.js
+export class rCUBE {
+  // Placeholder constructor
+  constructor() {
+    // No initialization yet
+  }
+
+  // Placeholder process method
+  process(morphOp) {
+    // No logic yet, just logging
+    console.log('CUBE IGNITED');
+    console.log('MorphOp in play:', morphOp);
+    // Future: Add PushModule, getSkel, update logic
+  }
+}
+
+sCUBE.js
+import SkeletonInitializer from '../MorphLogic/SkeletonInitializer.js';
+import PullModule from '../MorphLogic/PullModule.js';
+import watcher from '../utils/watcher.js';
+import weaver from '../utils/weaver.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+import { update } from '../../Nuerom/ZTRL/update.js'; // Added for skeleton update`
+
+export class sCUBE {
+  constructor(currentSKEL, userId) {
+    this.currentSKEL = currentSKEL; // Initial skeleton value
+    this.userId = userId; // Added for update
+  }
+
+  async process(sendAmount) {
+    console.log('CUBE ACTIVATE:', { currentSKEL: this.currentSKEL, sendAmount });
+    if (typeof sendAmount !== 'number' || sendAmount <= 0) {
+      throw new Error('sCUBE: Invalid send amount');
+    }
+    if (sendAmount > this.currentSKEL) {
+      throw new Error('sCUBE: Send amount exceeds current skeleton balance');
+    }
+
+    // Initialize skeleton for set phase
+    const skeleton = new SkeletonInitializer();
+    await skeleton.set(this.currentSKEL, true);
+    const initialState = skeleton.getState();
+
+    // Capture set phase with watcher
+    watcher({
+      phase: 'set',
+      state: {
+        initialSKEL: this.currentSKEL,
+        units: initialState.units.map(u => u.currentSymbol),
+        numberLength: initialState.numberLength
+      }
+    });
+
+    // Process pull with PullModule
+    const pullModule = new PullModule(skeleton);
+    const updatedState = await pullModule.pull(sendAmount);
+
+    // Update currentSKEL with correct conversion using SYMBOL_SEQUENCE
+    const newSkeleton = updatedState;
+    this.currentSKEL = parseInt(newSkeleton.units.slice(0, newSkeleton.numberLength).map(u => SYMBOL_SEQUENCE.indexOf(u.currentSymbol)).join('') || '0', 10);
+
+    // Capture final phase with watcher using updated currentSKEL
+    watcher({
+      phase: 'final',
+      skeleton: this.currentSKEL, // Reflects the new value (e.g., 90)
+      units: newSkeleton.units.map(u => u.currentSymbol),
+      length: newSkeleton.numberLength,
+      userId: this.userId, // Pass userId
+      proofId: null // To be generated
+    });
+
+    // Update weaver with POM
+    weaver.pom = { 
+      phase: 'final', 
+      proofId: 'temp-proof-id', 
+      skeleton: this.currentSKEL, // Updated skeleton value
+      units: newSkeleton.units.map(u => u.currentSymbol),
+      length: newSkeleton.numberLength,
+      userId: this.userId // Pass userId
+    };
+
+    // Log the updated skeleton and update server
+    console.log('CUBE UPDATED:', { newSkeleton });
+    update(
+      { userId: this.userId, newSKEL: this.currentSKEL }, // Use passed userId
+      (err, updateData) => {
+        if (err) {
+          console.error('Skeleton update failed:', err);
+        } else {
+          console.log('Skeleton updated successfully:', updateData);
+        }
+      }
+    );
+
+    return {
+      newSkeleton,
+      pom: weaver.pom
+    };
+  }
+}
+
+MorphLogic/
+
+PullModule.js
+import { morphInit } from '../core/MorphInit.js';
+import { Shutter } from './shutter.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export default class PullModule {
+  constructor(skeleton) {
+    this.skeleton = skeleton;
+  }
+
+  async pull(keyNumber) {
+    console.log(`Applying pull for ${keyNumber}`);
+    
+    const currentSkeletonNumber = parseInt(this.skeleton.units.slice(0, this.skeleton.state.numberLength).map(u => SYMBOL_SEQUENCE.indexOf(u.state.currentSymbol)).join('') || '0', 10);
+    
+    // Use MorphInit to determine skeleton and key
+    const { skeleton, key } = await morphInit(keyNumber, currentSkeletonNumber, false);
+    this.skeleton = skeleton;
+    const units = this.skeleton.units;
+    
+    // Apply the shifted key for pulling
+    for (let i = 0; i < key.push.length && i < units.length; i++) {
+      const pushEntry = key.push[i];
+      const [unitName, value] = pushEntry.split(':');
+      const unitIndex = parseInt(unitName.replace('U', '')) - 1;
+      const unit = units[unitIndex];
+      const position = `u${unitIndex + 1}`;
+      
+      const currentSymbol = unit.state && unit.state.currentSymbol ? unit.state.currentSymbol : VOID_SYMBOL;
+      
+      if (value !== 'null') {
+        const numValue = parseInt(value);
+        if (numValue > 0) {
+          console.log(`Pulling ${unitName}-${position}: ${numValue}`);
+          unit.pull(numValue, this.skeleton.carryBus);
+          // Propagate borrows (negative carries)
+          while (this.skeleton.carryBus.carryValue < 0) {
+            const { carryValue, carryTarget } = this.skeleton.carryBus.flushCarry();
+            const targetIndex = parseInt(carryTarget.replace('Unit', '')) - 1;
+            if (targetIndex >= 0 && targetIndex < units.length) {
+              console.log(`Borrow applied to Unit${targetIndex + 1}: ${carryValue}`);
+              units[targetIndex].pull(1, this.skeleton.carryBus);
+            }
+          }
+        } else if (currentSymbol !== VOID_SYMBOL) {
+          console.log(`Preserving ${unitName}-${position}: ${currentSymbol} (no pull)`);
+        }
+      } else {
+        console.log(`Skipping ${unitName}-${position}: null`);
+      }
+    }
+    
+    // Compute the new skeleton number
+    const newSkeletonNumber = Math.max(currentSkeletonNumber - keyNumber, 0);
+    console.log(`Computed new skeleton number: ${newSkeletonNumber}`);
+    
+    // Clear all unit states and carryBus before snapshot to prevent extra pushes
+    units.forEach(unit => {
+      if (unit.state) {
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+        unit.state.carry = 0;
+        unit.state.hasCollapsed = false;
+        unit.state.u1Collapse = false;
+      }
+    });
+    this.skeleton.carryBus.carryValue = 0;
+    this.skeleton.carryBus.carryTarget = null;
+    console.log('Cleared unit states and carryBus before snapshot');
+    
+    // Snapshot the skeleton mid-morph to ensure consistency
+    this.skeleton = await Shutter.snapMidMorph(this.skeleton, newSkeletonNumber);
+    
+    // Return the final state after snapshot
+    const finalState = this.skeleton.getState();
+    const finalSkeletonDisplay = `<${finalState.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${finalState.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${finalState.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+    console.log(`Final Skeleton (after pull): ${finalSkeletonDisplay}`);
+    return finalState;
+  }
+}
+
+PushModule.js
+import { morphInit } from '../core/MorphInit.js';
+import { SnapshotPush } from './SnapshotPush.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export default class PushModule {
+  constructor(skeleton) {
+    this.skeleton = skeleton;
+  }
+
+  async push(keyNumber) {
+    console.log(`Applying push for ${keyNumber}`);
+    
+    const currentSkeletonNumber = parseInt(this.skeleton.units.slice(0, this.skeleton.state.numberLength).map(u => SYMBOL_SEQUENCE.indexOf(u.state.currentSymbol)).join('') || '0', 10);
+    
+    // Use MorphInit to determine skeleton and key
+    const { skeleton, key } = await morphInit(keyNumber, currentSkeletonNumber, true);
+    this.skeleton = skeleton;
+    const units = this.skeleton.units;
+    
+    // Apply the shifted key for pushing
+    for (let i = 0; i < key.push.length && i < units.length; i++) {
+      const pushEntry = key.push[i];
+      const [unitName, value] = pushEntry.split(':');
+      const unitIndex = parseInt(unitName.replace('U', '')) - 1;
+      const unit = units[unitIndex];
+      const position = `u${unitIndex + 1}`;
+      
+      const currentSymbol = unit.state && unit.state.currentSymbol ? unit.state.currentSymbol : VOID_SYMBOL;
+      
+      if (value !== 'null') {
+        const numValue = parseInt(value);
+        if (numValue > 0) {
+          console.log(`Pushing ${unitName}-${position}: ${numValue}`);
+          unit.push(numValue, this.skeleton.carryBus);
+          // Propagate carries
+          while (this.skeleton.carryBus.carryValue > 0) {
+            const { carryValue, carryTarget } = this.skeleton.carryBus.flushCarry();
+            const targetIndex = parseInt(carryTarget.replace('Unit', '')) - 1;
+            if (targetIndex >= 0 && targetIndex < units.length) {
+              console.log(`Carry applied to Unit${targetIndex + 1}: ${carryValue}`);
+              units[targetIndex].push(carryValue, this.skeleton.carryBus);
+            }
+          }
+        } else if (currentSymbol !== VOID_SYMBOL) {
+          console.log(`Preserving ${unitName}-${position}: ${currentSymbol} (no push)`);
+        }
+      } else {
+        console.log(`Skipping ${unitName}-${position}: null`);
+      }
+    }
+    
+    // Check for U1 collapse and trigger snapPush if necessary
+    const newSkeletonNumber = currentSkeletonNumber + keyNumber;
+    await SnapshotPush.snapPush(this.skeleton, newSkeletonNumber);
+    
+    // Compute the new skeleton number for logging
+    console.log(`Computed new skeleton number: ${newSkeletonNumber}`);
+    
+    // If snapPush didn't reset the skeleton (u1Collapse was false), reset it to the computed number
+    const u1 = this.skeleton.units[0];
+    if (!u1.state.u1Collapse) {
+      console.log(`U1 did not collapse, resetting skeleton to computed number: ${newSkeletonNumber}`);
+      const digits = newSkeletonNumber.toString().split('').map(Number);
+      this.skeleton.state.numberLength = digits.length;
+      this.skeleton.state.activeUnitTarget = `u${this.skeleton.state.numberLength}`;
+
+      this.skeleton.units.forEach((unit, i) => {
+        unit.state.currentSymbol = VOID_SYMBOL;
+        unit.state.carry = 0;
+        unit.state.hasCollapsed = false;
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+        unit.state.u1Collapse = false;
+
+        const digit = digits[i];
+        if (digit !== undefined) {
+          console.log(`Resetting unit${i + 1} to ${digit}`);
+          unit.state.currentSymbol = SYMBOL_SEQUENCE[digit];
+          console.log(`Reset unit${i + 1} to ${digit} (symbol: ${SYMBOL_SEQUENCE[digit]})`);
+        }
+      });
+
+      const state = this.skeleton.getState();
+      this.skeleton.state.snapshot = JSON.parse(JSON.stringify(state)); // Deep copy snapshot
+      const skeletonDisplay = `<${state.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${state.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${state.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+      console.log(`Snapshot: ${JSON.stringify({
+        units: state.units.map(u => u.currentSymbol),
+        numberLength: state.numberLength,
+        activeUnitTarget: state.activeUnitTarget
+      })}`);
+      console.log(`Reset Skeleton: ${skeletonDisplay}`);
+    }
+    
+    units.forEach(unit => {
+      if (unit.state && unit.state.pushes) {
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+      }
+    });
+    
+    const finalState = this.skeleton.getState();
+    const skeletonDisplay = `<${finalState.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${finalState.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${finalState.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+    console.log(`Final Skeleton (after snapshot reset): ${skeletonDisplay}`);
+    return finalState;
+  }
+}
+
+shutter.js
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export const Shutter = {
+  async snapMidMorph(skeleton, computedNumber) {
+    console.log(`Shutter: Creating mid-morph snapshot for computed number: ${computedNumber}`);
+
+    // Reset the skeleton to the computed number
+    const digits = computedNumber.toString().split('').map(Number);
+    skeleton.state.numberLength = computedNumber === 0 ? 1 : digits.length;
+    skeleton.state.activeUnitTarget = `u${skeleton.state.numberLength}`;
+
+    skeleton.units.forEach((unit, i) => {
+      unit.state.currentSymbol = VOID_SYMBOL;
+      unit.state.carry = 0;
+      unit.state.hasCollapsed = false;
+      unit.state.pushes = [];
+      unit.state.pushesLength = 0;
+      unit.state.u1Collapse = false;
+
+      const digit = digits[i];
+      if (digit !== undefined) {
+        console.log(`Shutter: Resetting unit${i + 1} to ${digit}`);
+        unit.state.currentSymbol = SYMBOL_SEQUENCE[digit];
+        console.log(`Shutter: Reset unit${i + 1} to ${digit} (symbol: ${SYMBOL_SEQUENCE[digit]})`);
+      }
+    });
+
+    // Force update of skeleton.state.units to reflect the changes
+    skeleton.state.units = skeleton.units.map(unit => ({
+      currentSymbol: unit.state.currentSymbol,
+      carry: unit.state.carry,
+      hasCollapsed: unit.state.hasCollapsed,
+      pushes: unit.state.pushes,
+      pushesLength: unit.state.pushesLength,
+      u1Collapse: unit.state.u1Collapse
+    }));
+    skeleton.state.snapshot = JSON.parse(JSON.stringify(skeleton.state)); // Deep copy snapshot
+
+    const skeletonDisplay = `<${skeleton.state.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${skeleton.state.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${skeleton.state.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+    console.log(`Shutter: Snapshot created: ${JSON.stringify({
+      units: skeleton.state.units.map(u => u.currentSymbol),
+      numberLength: skeleton.state.numberLength,
+      activeUnitTarget: skeleton.state.activeUnitTarget
+    })}`);
+    console.log(`Shutter: Skeleton: ${skeletonDisplay}`);
+
+    return skeleton;
+  }
+};
+
+SkeletonInitializer.js
+import { extendUnits as extendUnitsPush } from '../skeleton/unitExtensionsPush.js';
+import { extendUnits as extendUnitsPull } from '../skeleton/unitExtensionsPull.js';
+import CarryBus from '../core/carryBus.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export default class SkeletonInitializer {
+  constructor() {
+    this.units = [];
+    this.carryBus = null;
+    this.state = {
+      numberLength: 1,
+      activeUnitTarget: 'u1',
+      snapshot: null
+    };
+  }
+
+  async init(isPushOperation = true) {
+    try {
+      const extendUnitsModule = isPushOperation ? extendUnitsPush : extendUnitsPull;
+      console.log(`Using static import for ${isPushOperation ? 'unitExtensionsPush.js' : 'unitExtensionsPull.js'}`);
+      const { Unit1, Unit2, Unit3, Unit4, Unit5, Unit6, Unit7, Unit8, Unit9, Unit10, Unit11, Unit12 } = await extendUnitsModule();
+      
+      this.units = [
+        new Unit1(),
+        new Unit2(),
+        new Unit3(),
+        new Unit4(),
+        new Unit5(),
+        new Unit6(),
+        new Unit7(),
+        new Unit8(),
+        new Unit9(),
+        new Unit10(),
+        new Unit11(),
+        new Unit12()
+      ];
+      this.carryBus = new CarryBus();
+      this.units.forEach(unit => { unit.skeleton = this; });
+    } catch (error) {
+      console.error('Error in init:', error);
+      throw error;
+    }
+  }
+
+  async set(number, isPushOperation = true) {
+    await this.init(isPushOperation);
+    console.log(`Setting skeleton for ${number}`);
+    
+    if (number < 0 || number > 999999999999) {
+      throw new Error('Number must be between 0 and 999,999,999,999');
+    }
+    
+    const digits = number.toString().split('').map(Number);
+    this.state.numberLength = digits.length;
+    this.state.activeUnitTarget = `u${this.state.numberLength}`;
+    
+    this.units.forEach((unit, i) => {
+      unit.state.currentSymbol = VOID_SYMBOL;
+      unit.state.carry = 0;
+      unit.state.hasCollapsed = false;
+      unit.state.pushes = [];
+      unit.state.pushesLength = 0;
+      unit.state.u1Collapse = false;
+      
+      const digit = digits[i];
+      if (digit !== undefined) {
+        console.log(`Setting unit${i + 1} to ${digit}`);
+        unit.state.currentSymbol = SYMBOL_SEQUENCE[digit];
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+        console.log(`Set unit${i + 1} to ${digit} (symbol: ${SYMBOL_SEQUENCE[digit]})`);
+      }
+    });
+    
+    const state = this.getState();
+    this.state.snapshot = JSON.parse(JSON.stringify(state)); // Deep copy snapshot
+    const skeleton = `<${state.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${state.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${state.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+    console.log(`Snapshot: ${JSON.stringify({
+      units: state.units.map(u => u.currentSymbol),
+      numberLength: state.numberLength,
+      activeUnitTarget: state.activeUnitTarget
+    })}`);
+    console.log(`Skeleton: ${skeleton}`);
+    return state;
+  }
+
+  getState() {
+    return {
+      units: this.units.map(unit => unit.getState()),
+      numberLength: this.state.numberLength,
+      activeUnitTarget: this.state.activeUnitTarget
+    };
+  }
+}
+
+SnapshotPull.js
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export const SnapshotPull = {
+  async snapPull(skeleton, newNumber) {
+    const u1 = skeleton.units[0]; // Unit 1
+
+    // Check if U1 has collapsed (gone below 0)
+    if (u1.state.u1Collapse) {
+      console.log(`U1 has collapsed (u1Collapse: ${u1.state.u1Collapse}), triggering snapshot pull for new number: ${newNumber}`);
+
+      // Snapshot the new number and reset the skeleton
+      const digits = newNumber.toString().split('').map(Number);
+      skeleton.state.numberLength = digits.length || 1; // Ensure length is at least 1 for 0
+      skeleton.state.activeUnitTarget = `u${skeleton.state.numberLength}`;
+
+      skeleton.units.forEach((unit, i) => {
+        unit.state.currentSymbol = VOID_SYMBOL;
+        unit.state.carry = 0;
+        unit.state.hasCollapsed = false;
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+        unit.state.u1Collapse = false;
+
+        const digit = digits[i];
+        if (digit !== undefined) {
+          console.log(`Resetting unit${i + 1} to ${digit}`);
+          unit.state.currentSymbol = SYMBOL_SEQUENCE[digit];
+          console.log(`Reset unit${i + 1} to ${digit} (symbol: ${SYMBOL_SEQUENCE[digit]})`);
+        }
+      });
+
+      const state = skeleton.getState();
+      skeleton.state.snapshot = JSON.parse(JSON.stringify(state)); // Deep copy snapshot
+      const skeletonDisplay = `<${state.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${state.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${state.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+      console.log(`Snapshot: ${JSON.stringify({
+        units: state.units.map(u => u.currentSymbol),
+        numberLength: state.numberLength,
+        activeUnitTarget: state.activeUnitTarget
+      })}`);
+      console.log(`Reset Skeleton: ${skeletonDisplay}`);
+    } else {
+      console.log(`U1 has not collapsed (u1Collapse: ${u1.state.u1Collapse}), skipping snapshot pull`);
+    }
+
+    return skeleton;
+  }
+};
+
+SnapshotPush.js
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export const SnapshotPush = {
+  async snapPush(skeleton, newNumber) {
+    const u1 = skeleton.units[0]; // Unit 1
+
+    // Check if U1 has collapsed (exceeded 9)
+    if (u1.state.u1Collapse) {
+      console.log(`U1 has collapsed (u1Collapse: ${u1.state.u1Collapse}), triggering snapshot push for new number: ${newNumber}`);
+
+      // Snapshot the new number and reset the skeleton
+      const digits = newNumber.toString().split('').map(Number);
+      skeleton.state.numberLength = digits.length;
+      skeleton.state.activeUnitTarget = `u${skeleton.state.numberLength}`;
+
+      skeleton.units.forEach((unit, i) => {
+        unit.state.currentSymbol = VOID_SYMBOL;
+        unit.state.carry = 0;
+        unit.state.hasCollapsed = false;
+        unit.state.pushes = [];
+        unit.state.pushesLength = 0;
+        unit.state.u1Collapse = false;
+
+        const digit = digits[i];
+        if (digit !== undefined) {
+          console.log(`Resetting unit${i + 1} to ${digit}`);
+          unit.state.currentSymbol = SYMBOL_SEQUENCE[digit];
+          console.log(`Reset unit${i + 1} to ${digit} (symbol: ${SYMBOL_SEQUENCE[digit]})`);
+        }
+      });
+
+      const state = skeleton.getState();
+      skeleton.state.snapshot = JSON.parse(JSON.stringify(state)); // Deep copy snapshot
+      const skeletonDisplay = `<${state.units.slice(0, 4).map(u => u.currentSymbol).join('')}|${state.units.slice(4, 8).map(u => u.currentSymbol).join('')}|${state.units.slice(8, 12).map(u => u.currentSymbol).join('')}>`;
+      console.log(`Snapshot: ${JSON.stringify({
+        units: state.units.map(u => u.currentSymbol),
+        numberLength: state.numberLength,
+        activeUnitTarget: state.activeUnitTarget
+      })}`);
+      console.log(`Reset Skeleton: ${skeletonDisplay}`);
+    } else {
+      console.log(`U1 has not collapsed (u1Collapse: ${u1.state.u1Collapse}), skipping snapshot push`);
+    }
+
+    return skeleton;
+  }
+};
+
+skeleton/
+------------------------------------------------------------------
+UNITS 1-12 unit1.js unit2.js ect... each unit has its own .js
+------------------------------------------------------------------
+import { VOID_SYMBOL } from '../core/SacredSymbols.js';
+!Repeat for Rest
+export class Unit1 {
+  constructor() {
+    this.unitNumber = 1;
+    this.state = {
+      currentSymbol: VOID_SYMBOL,
+      carry: 0,
+      hasCollapsed: false,
+      pushes: [],
+      pushesLength: 0,
+      u1Collapse: false
+    };
+  }
+
+  getState() {
+    return this.state;
+  }
+}
+
+unitExtensionsPull.js
+import { Unit1 } from './unit1.js';
+import { Unit2 } from './unit2.js';
+import { Unit3 } from './unit3.js';
+import { Unit4 } from './unit4.js';
+import { Unit5 } from './unit5.js';
+import { Unit6 } from './unit6.js';
+import { Unit7 } from './unit7.js';
+import { Unit8 } from './unit8.js';
+import { Unit9 } from './unit9.js';
+import { Unit10 } from './unit10.js';
+import { Unit11 } from './unit11.js';
+import { Unit12 } from './unit12.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export async function extendUnits() {
+  class Unit1Pull extends Unit1 {
+    pull(count, carryBus) {
+      console.log(`unit1 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          this.state.u1Collapse = true;
+          console.log(
+            `unit1 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit1 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed} U1COLLAPSE: ${this.state.u1Collapse}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit1 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit1 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit2Pull extends Unit2 {
+    pull(count, carryBus) {
+      console.log(`unit2 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit2 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit2 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit2 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit2 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit3Pull extends Unit3 {
+    pull(count, carryBus) {
+      console.log(`unit3 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit3 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit3 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit3 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit3 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit4Pull extends Unit4 {
+    pull(count, carryBus) {
+      console.log(`unit4 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit4 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit4 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit4 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit4 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit5Pull extends Unit5 {
+    pull(count, carryBus) {
+      console.log(`unit5 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit5 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit5 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit5 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit5 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit6Pull extends Unit6 {
+    pull(count, carryBus) {
+      console.log(`unit6 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit6 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit6 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit6 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit6 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit7Pull extends Unit7 {
+    pull(count, carryBus) {
+      console.log(`unit7 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit7 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit7 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit7 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit7 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit8Pull extends Unit8 {
+    pull(count, carryBus) {
+      console.log(`unit8 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit8 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit8 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit8 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit8 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit9Pull extends Unit9 {
+    pull(count, carryBus) {
+      console.log(`unit9 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit9 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit9 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit9 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit9 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit10Pull extends Unit10 {
+    pull(count, carryBus) {
+      console.log(`unit10 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit10 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit10 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit10 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit10 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit11Pull extends Unit11 {
+    pull(count, carryBus) {
+      console.log(`unit11 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit11 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit11 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit11 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit11 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit12Pull extends Unit12 {
+    pull(count, carryBus) {
+      console.log(`unit12 Pull Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : 0;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex - 1);
+        if (currentIndex < 0) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[10]; // Set to ♤ (10) temporarily
+          this.state.carry = -1; // Register a borrow
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit12 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+          console.log(
+            `unit12 Borrow: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          carryBus.registerCarry(this.state.carry, `Unit${this.unitNumber - 1}`);
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit12 Pull: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: -1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit12 Pull End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  return {
+    Unit1: Unit1Pull,
+    Unit2: Unit2Pull,
+    Unit3: Unit3Pull,
+    Unit4: Unit4Pull,
+    Unit5: Unit5Pull,
+    Unit6: Unit6Pull,
+    Unit7: Unit7Pull,
+    Unit8: Unit8Pull,
+    Unit9: Unit9Pull,
+    Unit10: Unit10Pull,
+    Unit11: Unit11Pull,
+    Unit12: Unit12Pull
+  };
+}
+
+unitExtensionsPush.js
+import { Unit1 } from './unit1.js';
+import { Unit2 } from './unit2.js';
+import { Unit3 } from './unit3.js';
+import { Unit4 } from './unit4.js';
+import { Unit5 } from './unit5.js';
+import { Unit6 } from './unit6.js';
+import { Unit7 } from './unit7.js';
+import { Unit8 } from './unit8.js';
+import { Unit9 } from './unit9.js';
+import { Unit10 } from './unit10.js';
+import { Unit11 } from './unit11.js';
+import { Unit12 } from './unit12.js';
+import { SYMBOL_SEQUENCE, VOID_SYMBOL } from '../core/SacredSymbols.js';
+
+export async function extendUnits() {
+  class Unit1Push extends Unit1 {
+    push(count, carryBus) {
+      console.log(`unit1 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          this.state.u1Collapse = true;
+          console.log(
+            `unit1 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit1 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed} U1COLLAPSE: ${this.state.u1Collapse}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit1 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit1 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit2Push extends Unit2 {
+    push(count, carryBus) {
+      console.log(`unit2 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit2 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit2 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit2 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit2 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit3Push extends Unit3 {
+    push(count, carryBus) {
+      console.log(`unit3 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit3 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit3 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit3 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit3 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit4Push extends Unit4 {
+    push(count, carryBus) {
+      console.log(`unit4 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit4 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit4 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit4 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit4 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit5Push extends Unit5 {
+    push(count, carryBus) {
+      console.log(`unit5 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit5 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit5 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit5 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit5 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit6Push extends Unit6 {
+    push(count, carryBus) {
+      console.log(`unit6 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit6 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit6 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit6 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit6 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit7Push extends Unit7 {
+    push(count, carryBus) {
+      console.log(`unit7 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit7 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit7 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit7 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit7 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit8Push extends Unit8 {
+    push(count, carryBus) {
+      console.log(`unit8 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit8 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit8 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit8 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit8 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit9Push extends Unit9 {
+    push(count, carryBus) {
+      console.log(`unit9 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit9 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit9 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit9 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit9 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit10Push extends Unit10 {
+    push(count, carryBus) {
+      console.log(`unit10 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit10 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit10 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit10 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit10 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit11Push extends Unit11 {
+    push(count, carryBus) {
+      console.log(`unit11 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit11 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit11 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit11 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit11 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  class Unit12Push extends Unit12 {
+    push(count, carryBus) {
+      console.log(`unit12 Push Start: times=${count}, currentSymbol=${this.state.currentSymbol}`);
+      
+      let currentIndex = this.state.currentSymbol && this.state.currentSymbol !== VOID_SYMBOL
+        ? SYMBOL_SEQUENCE.indexOf(this.state.currentSymbol)
+        : -1;
+      
+      for (let i = 0; i < count; i++) {
+        currentIndex = (currentIndex + 1);
+        if (currentIndex >= SYMBOL_SEQUENCE.length - 1) {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex]; // Set to ♤ temporarily
+          this.state.carry = 1;
+          this.state.hasCollapsed = true;
+          console.log(
+            `unit12 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+          console.log(
+            `unit12 Carry: CARRY: ${this.state.carry} COLLAPSED: ${this.state.hasCollapsed}`
+          );
+          // Not propagating carry yet
+        } else {
+          this.state.currentSymbol = SYMBOL_SEQUENCE[currentIndex];
+          console.log(
+            `unit12 Push: SYMBOL: ${this.state.currentSymbol} CARRY: ${this.state.carry} DIRECTION: 1`
+          );
+        }
+        this.state.pushes.push(this.state.currentSymbol);
+      }
+      
+      this.state.pushesLength = this.state.pushes.length;
+      console.log(`unit12 Push End: pushesLength=${this.state.pushesLength}`);
+    }
+  }
+
+  return {
+    Unit1: Unit1Push,
+    Unit2: Unit2Push,
+    Unit3: Unit3Push,
+    Unit4: Unit4Push,
+    Unit5: Unit5Push,
+    Unit6: Unit6Push,
+    Unit7: Unit7Push,
+    Unit8: Unit8Push,
+    Unit9: Unit9Push,
+    Unit10: Unit10Push,
+    Unit11: Unit11Push,
+    Unit12: Unit12Push
+  };
+}
+
+utils/
+watctcher.js grabs data for PROOF OF MORPH can see how it works in sCUBE.js 
+import weaver from './weaver.js';
+
+export default function watcher(data) {
+  console.log('Watcher: Captured data:', JSON.stringify(data, null, 2));
+  return weaver(data);
+}
+weaver.js
+import { v4 as uuidv4 } from 'uuid';
+export default function weaver(data) {
+  // Initialize POM if not set
+  if (!weaver.pom) {
+    weaver.pom = {
+      set: null,
+      morphops: [],
+      final: null,
+      proofId: null,
+      userId: null
+    };
+  }
+
+  // Label data based on phase
+  if (data && data.phase) {
+    if (data.phase === 'set') {
+      weaver.pom.set = {
+        initialSKEL: data.state?.initialSKEL,
+        units: data.state?.units,
+        length: data.state?.numberLength
+      };
+    } else if (data.phase === 'morphops') {
+      const morph = {
+        id: data.id || 'uuid-placeholder',
+        intent: data.intent,
+        value: data.value,
+        unitName: data.unitName,
+        symbolBefore: data.symbolBefore
+      };
+      weaver.pom.morphops.push(morph);
+    } else if (data.phase === 'final') {
+      weaver.pom.final = {
+        skeleton: data.skeleton,
+        units: data.units,
+        length: data.length
+      };
+      weaver.pom.userId = data.userId;
+      weaver.pom.proofId = uuidv4(); // UUID later
+    }
+  }
+
+  // Log the current POM state
+  console.log('Weaver: Building POM:', JSON.stringify(weaver.pom, null, 2));
+
+  return weaver.pom;
+}
+
+// Reset POM for new test cases
+weaver.reset = function() {
+  weaver.pom = null;
+};
+
+index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZetaMorph SPWA</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.jsx"></script>
+  </body>
+</html>
