@@ -1,6 +1,39 @@
-REACT0R/
+ZetaMorph IS A NOT LOGIC MATH ENGINE USING STATE PRESSURE OF SHAPE ON A Skeleton DOM . reactor is a react app that houses morphlogic to send LSD liquidstate dollar
+via mesh system. this is the shape of mathmatics sentient finance app using NUEROM Protocol router to route morphops (send rec) soon to be deeper more complex logicthe goal is distrubuted intellgence GPU Free 
+RAM first of shape manipulation to solve problems.
 
-Nuerom/
+for the server  see nuerom/ 
+
+
+REACT0R/
+{
+  "name": "reactor",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "reactor",
+      "version": "0.0.0",
+      "dependencies": {
+        "@vitejs/plugin-react": "^4.5.0",
+        "axios": "^1.10.0",
+        "bootstrap": "^5.3.7",
+        "buffer": "^6.0.3",
+        "crypto-js": "^4.2.0",
+        "react": "^18.2.0",
+        "react-bootstrap": "^2.10.10",
+        "react-dom": "^18.2.0",
+        "simple-peer": "^9.11.1",
+        "uuid": "^11.1.0",
+        "webrtc-adapter": "^9.0.3"
+      },
+      "devDependencies": {
+        "vite": "^6.3.5"
+      }
+    },
+
+Nuerom/ Nuerom is the name of the sever protocol this is Reactors side api folder , ill show you the server next
 User/
 
 logIn.js

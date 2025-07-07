@@ -3,7 +3,7 @@ import { fetchMorphOps } from '../../../../Nuerom/ZTRL/receive.js'; // Adjust pa
 import Card from 'react-bootstrap/Card';
 import ListGroup from 'react-bootstrap/ListGroup';
 import Button from 'react-bootstrap/Button';
-import { rCUBE } from '../../../../ZM/MORPHCUBE/rCUBE.js'; // Placeholder import
+import { ReceiveCube } from '../../../../ZM/MORPHCUBE/rCUBE.js';
 
 function Receive({ userId }) {
   const [morphOps, setMorphOps] = useState([]);
@@ -21,11 +21,17 @@ function Receive({ userId }) {
     loadMorphOps();
   }, [userId]);
 
-  const handleProcess = (morphOp) => {
-    console.log('CUBE IGNITED');
-    console.log('MorphOp in play:', morphOp);
-    // Placeholder for rCUBE logic
-  };
+const handleProcess = async (morphOp) => {
+  try {
+    const cube = new ReceiveCube({ id: userId, token: localStorage.getItem('token') });
+    const result = await cube.process(morphOp);
+    console.log('Receive: Processed morphOp:', result);
+    // Trigger UI refresh (e.g., notify Dashboard.jsx)
+    // Future: Call update.js to sync server
+  } catch (error) {
+    setError(error.message);
+  }
+};
 
   return (
     <Card>
