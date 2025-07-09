@@ -37,7 +37,7 @@ function Send({ userId, onSendComplete }) {
       const { newSkeleton, pom } = await sCube.process(value); // Process with cube
       console.log('Cube Result:', { newSkeleton, pom });
       const morphOp = {
-        intent: 'PULL', // Required field
+        intent: 'PUSH', // Required field
         value: value,   // Required field
         morphId: uuidv4(),
         targetMorphId: formData.targetMorphId, // Required field

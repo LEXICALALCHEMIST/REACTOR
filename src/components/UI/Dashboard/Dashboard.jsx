@@ -1,43 +1,58 @@
-import React from 'react';
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Col from 'react-bootstrap/Col';
-import Card from 'react-bootstrap/Card';
-import Send from '../Send/Send.jsx';
-import Receive from '../Receive/Receive.jsx';
-import './Dashboard.css';
+  import React, { useState } from 'react';
+  import { getSkel } from '../../../../Nuerom/ZTRL/getSkel.js';
+  import Container from 'react-bootstrap/Container';
+  import Tab from 'react-bootstrap/Tab';
+  import Tabs from 'react-bootstrap/Tabs';
+  import WalletView from '../../Views/walletView.jsx';
+  import SendView from '../../Views/sendView.jsx';
+  import ReceiveView from '../../Views/receiveView.jsx';
+  import './Dashboard.css';
 
-function Dashboard({ user }) {
-  const handleSendComplete = () => {
-    // Optionally refresh user data (e.g., fetch current_skel)
-    console.log('Send complete, refreshing UI if needed');
+  function Dashboard({ user }) {
+    const [userData, setUserData] = useState(user);
+
+    const handleSendComplete = async () => {
+      console.log('Send complete, refreshing UI');
+      try {
+        const current_skel = await getSkel(userData.id);
+        setUserData({ ...userData, current_skel });
+        console.log(`Dashboard: Updated current_skel to ${current_skel}`);
+      } catch (error) {
+        console.error('Dashboard: Failed to refresh current_skel:', error.message);
+      }
+    };
+
+    
+  const handleReceiveComplete = async (newSKEL) => {
+    try {
+      const current_skel = await getSkel(userData.id);
+      setUserData({ ...userData, current_skel });
+      console.log(`Dashboard: Updated current_skel to ${current_skel}`);
+    } catch (error) {
+      console.error('Dashboard: Failed to refresh current_skel:', error.message);
+    }
   };
 
-  return (
-    <Container className="dashboard">
-      <h1 className='navbar-logo'>Node: {user?.username || 'User'}</h1>
-      <Row>
-        <Col md={6}>
-          <Card className="mb-4">
-            <Card.Header>Wallet Balance</Card.Header>
-            <Card.Body>
-              <Card.Text>Current Skeleton: {user?.current_skel || 0} LSD</Card.Text>
-              <Card.Text>Morph ID: {user?.morph_id || 'N/A'}</Card.Text>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={6}>
-          <Card className="mb-4">
-            <Card.Header>Send LSD</Card.Header>
-            <Card.Body>
-              <Send userId={user?.id} onSendComplete={handleSendComplete} />
-            </Card.Body>
-            <Receive userId={user?.id} />
-          </Card>
-        </Col>
-      </Row>
-    </Container>
-  );
-}
+    return (
+      <Container className="dashboard">
+        <Tabs
+          defaultActiveKey="wallet"
+          transition={false}
+          id="noanim-tab-example"
+          className="mb-3"
+        >
+          <Tab eventKey="wallet" title="Wallet">
+            <WalletView user={userData} />
+          </Tab>
+          <Tab eventKey="profile" title="Send">
+            <SendView userId={userData?.id} onSendComplete={handleSendComplete} />
+          </Tab>
+          <Tab eventKey="receive" title="Receive">
+            <ReceiveView userId={userData?.id} onReceiveComplete={handleReceiveComplete} />
+          </Tab>
+        </Tabs>
+      </Container>
+    );
+  }
 
-export default Dashboard;
+  export default Dashboard;
