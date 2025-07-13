@@ -16,7 +16,8 @@ function Register({ setLoggedIn, setUser }) {
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
-
+  
+  // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
