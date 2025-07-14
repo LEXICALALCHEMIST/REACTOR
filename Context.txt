@@ -33,7 +33,8 @@ REACT0R/
       }
     },
 
-Nuerom/ Nuerom is the name of the sever protocol this is Reactors side api folder , ill show you the server next
+Nuerom/ (Nuerom is the name of the sever protocol this is Reactors side api folder , ill show you the server Nuerom-Protocol next)
+
 User/
 
 logIn.js
@@ -214,44 +215,60 @@ UI/
 Dashboard/
 
 Dashboard.jsx
-import React from 'react';
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Col from 'react-bootstrap/Col';
-import Card from 'react-bootstrap/Card';
-import Send from '../Send/Send.jsx';
-import Receive from '../Receive/Receive.jsx';
-import './Dashboard.css';
+  import React, { useState } from 'react';
+  import { getSkel } from '../../../../Nuerom/ZTRL/getSkel.js';
+  import Container from 'react-bootstrap/Container';
+  import Tab from 'react-bootstrap/Tab';
+  import Tabs from 'react-bootstrap/Tabs';
+  import WalletView from '../../Views/walletView.jsx';
+  import SendView from '../../Views/sendView.jsx';
+  import ReceiveView from '../../Views/receiveView.jsx';
 
-function Dashboard({ user }) {
-  const handleSendComplete = () => {
-    // Optionally refresh user data (e.g., fetch current_skel)
-    console.log('Send complete, refreshing UI if needed');
+  import './Dashboard.css';
+
+  function Dashboard({ user }) {
+  const [userData, setUserData] = useState(user);
+
+  const handleSendComplete = async (newSKEL) => {
+    console.log('Send complete, refreshing UI');
+    try {
+      const current_skel = await getSkel(userData.id);
+      setUserData({ ...userData, current_skel });
+      console.log(`Dashboard: Updated current_skel to ${current_skel}`);
+    } catch (error) {
+      console.error('Dashboard: Failed to refresh current_skel:', error.message);
+    }
+  };
+
+  const handleReceiveComplete = async (newSKEL) => {
+    console.log('Receive complete, refreshing UI');
+    try {
+      const current_skel = await getSkel(userData.id);
+      setUserData({ ...userData, current_skel });
+      console.log(`Dashboard: Updated current_skel to ${current_skel}`);
+    } catch (error) {
+      console.error('Dashboard: Failed to refresh current_skel:', error.message);
+    }
   };
 
   return (
     <Container className="dashboard">
-      <h1 className='navbar-logo'>Node: {user?.username || 'User'}</h1>
-      <Row>
-        <Col md={6}>
-          <Card className="mb-4">
-            <Card.Header>Wallet Balance</Card.Header>
-            <Card.Body>
-              <Card.Text>Current Skeleton: {user?.current_skel || 0} LSD</Card.Text>
-              <Card.Text>Morph ID: {user?.morph_id || 'N/A'}</Card.Text>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={6}>
-          <Card className="mb-4">
-            <Card.Header>Send LSD</Card.Header>
-            <Card.Body>
-              <Send userId={user?.id} onSendComplete={handleSendComplete} />
-            </Card.Body>
-            <Receive userId={user?.id} />
-          </Card>
-        </Col>
-      </Row>
+      <Tabs
+        defaultActiveKey="home"
+        transition={false}
+        id="noanim-tab-example"
+        className="mb-3"
+      >
+        <Tab eventKey="home" title="Home">
+          <WalletView user={userData} />
+        </Tab>
+        <Tab eventKey="profile" title="Send">
+          <SendView userId={userData?.id} onSendComplete={handleSendComplete} />
+        </Tab>
+        <Tab eventKey="contact" title="Receive">
+          <ReceiveView userId={userData?.id} onReceiveComplete={handleReceiveComplete} />
+        </Tab>
+      </Tabs>
     </Container>
   );
 }
@@ -382,45 +399,86 @@ import { fetchMorphOps } from '../../../../Nuerom/ZTRL/receive.js'; // Adjust pa
 import Card from 'react-bootstrap/Card';
 import ListGroup from 'react-bootstrap/ListGroup';
 import Button from 'react-bootstrap/Button';
-import { rCUBE } from '../../../../ZM/MORPHCUBE/rCUBE.js'; // Placeholder import
+import { ReceiveCube } from '../../../../ZM/MORPHCUBE/rCUBE.js';
+import Vesper from '../Vesper/Vesper.jsx';
 
-function Receive({ userId }) {
-  const [morphOps, setMorphOps] = useState([]);
+function Receive({ userId, onReceiveComplete }) {
+  const [morphOps, setMorphOps] = useState([]); // Fetch pending morph operations
   const [error, setError] = useState('');
+  const [vesperState, setVesperState] = useState({ show: false, message: '' });// State for Vesper notifications
 
   useEffect(() => {
     const loadMorphOps = async () => {
       try {
         const ops = await fetchMorphOps(userId);
         setMorphOps(ops);
+        setError('');
       } catch (err) {
-        setError(err);
+        setError(err.message || 'Failed to fetch morphOps');
       }
     };
+
+    //Pending MorphOs Mount
     loadMorphOps();
+    const intervalId = setInterval(loadMorphOps, 10000);
+
+    return () => clearInterval(intervalId);
   }, [userId]);
 
-  const handleProcess = (morphOp) => {
-    console.log('CUBE IGNITED');
-    console.log('MorphOp in play:', morphOp);
-    // Placeholder for rCUBE logic
+  //Process MorphOp
+  const handleProcess = async (morphOp) => {
+    try {
+      const cube = new ReceiveCube({ id: userId, token: localStorage.getItem('token') });
+      const result = await cube.process(morphOp);
+      console.log('Receive: Processed morphOp:', result);
+      setVesperState({ show: true, message: `Processed Successful: ${result.newSKEL} LSD` });
+      if (onReceiveComplete) {
+        onReceiveComplete(result.newSKEL);
+      }
+    } catch (error) {
+      setError(error.message);
+      setVesperState({ show: true, message: `Process Failed: ${error.message}` });
+    }
+  };
+
+  //VESPER State/Notifcation Handler
+  const handleVesperClose = async (stateKey) => {
+    try {
+      if (stateKey === 'morphOps') {
+        const ops = await fetchMorphOps(userId);
+        setMorphOps(ops);
+        console.log('Receive: Refreshed morphOps:', ops);
+      }
+      setVesperState({ show: false, message: '' });
+    } catch (error) {
+      console.error('Receive: Failed to refresh morphOps:', error.message);
+    }
   };
 
   return (
-    <Card>
-      <Card.Header>Pending Morph Operations</Card.Header>
-      <Card.Body>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <ListGroup>
-          {morphOps.map((morphOp) => (
-            <ListGroup.Item key={morphOp.id}>
-              ID: {morphOp.id}, Value: {morphOp.value}, Target: {morphOp.target_id || morphOp.targetMorphId}
-              <Button variant="primary" className="ms-2" onClick={() => handleProcess(morphOp)}>Process</Button>
-            </ListGroup.Item>
-          ))}
-        </ListGroup>
-      </Card.Body>
-    </Card>
+    <>
+      <Card>
+        <Card.Header>Pending Morph Operations</Card.Header>
+        <Card.Body>
+          {error && <p style={{ color: 'red' }}>{error}</p>}
+          <ListGroup>
+            {morphOps.map((morphOp) => (
+              <ListGroup.Item key={morphOp.id}>
+                ID: {morphOp.id}, Value: {morphOp.value}, Target: {morphOp.target_id || morphOp.targetMorphId}
+                <Button variant="primary" className="ms-2" onClick={() => handleProcess(morphOp)}>Process</Button>
+              </ListGroup.Item>
+            ))}
+          </ListGroup>
+        </Card.Body>
+      </Card>
+      <Vesper
+        show={vesperState.show}
+        message={vesperState.message}
+        stateKey="morphOps"
+        refreshState={handleVesperClose}
+        onClose={() => setVesperState({ show: false, message: '' })}
+      />
+    </>
   );
 }
 
@@ -556,11 +614,11 @@ Send.jsx
 import React, { useState } from 'react';
 import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
-import { v4 as uuidv4 } from 'uuid'; // For morphId generation
-import { create } from '../../../../Nuerom/ZTRL/create.js'; // Adjust path as needed
-import { getSkel } from '../../../../Nuerom/ZTRL/getSkel.js'; // Added for skeleton fetch
-import { sCUBE } from '../../../../ZM/MORPHCUBE/sCUBE.js'; // Added for cube integration
-
+import { v4 as uuidv4 } from 'uuid';
+import { create } from '../../../../Nuerom/ZTRL/create.js';
+import { getSkel } from '../../../../Nuerom/ZTRL/getSkel.js';
+import { sCUBE } from '../../../../ZM/MORPHCUBE/sCUBE.js';
+import Vesper from '../Vesper/Vesper.jsx';
 
 function Send({ userId, onSendComplete }) {
   const [formData, setFormData] = useState({
@@ -568,6 +626,7 @@ function Send({ userId, onSendComplete }) {
     value: ''
   });
   const [error, setError] = useState('');
+  const [vesperState, setVesperState] = useState({ show: false, message: '' });
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -579,75 +638,226 @@ function Send({ userId, onSendComplete }) {
     const value = parseInt(formData.value, 10);
     if (isNaN(value) || value <= 0) {
       setError('Value must be a positive number');
+      setVesperState({ show: true, message: 'Send Failed: Value must be a positive number' });
       return;
     }
     if (!formData.targetMorphId) {
       setError('Target Morph ID is required');
+      setVesperState({ show: true, message: 'Send Failed: Target Morph ID is required' });
       return;
     }
     try {
-      const currentSKEL = await getSkel(userId); // Fetch current skeleton
+      const currentSKEL = await getSkel(userId);
       console.log('Current Skeleton:', currentSKEL);
-      const sCube = new sCUBE(currentSKEL, userId); // Pass userId
-      const { newSkeleton, pom } = await sCube.process(value); // Process with cube
+      if (value > currentSKEL) {
+        setError('Insufficient LSD balance');
+        setVesperState({ show: true, message: 'Send Failed: Insufficient LSD balance' });
+        return;
+      }
+      const sCube = new sCUBE(currentSKEL, userId);
+      const { newSkeleton, pom } = await sCube.process(value);
       console.log('Cube Result:', { newSkeleton, pom });
       const morphOp = {
-        intent: 'PULL', // Required field
-        value: value,   // Required field
+        intent: 'PUSH',
+        value: value,
         morphId: uuidv4(),
-        targetMorphId: formData.targetMorphId, // Required field
+        targetMorphId: formData.targetMorphId,
         userId: userId,
-        signature: 'temp-signature', // Required field
-        id: null // Placeholder for morphOp.id from create
+        signature: 'temp-signature',
+        id: null
       };
+      
       await create(morphOp, (err, data) => {
         if (err) {
           setError(err);
+          setVesperState({ show: true, message: `Send Failed: ${err}` });
         } else {
           console.log('MorphOp created:', data.morphOp);
-          if (onSendComplete) onSendComplete(); // Notify Dashboard
+          setVesperState({ show: true, message: `Send Complete: ${value} LSD` });
+          if (onSendComplete) onSendComplete(newSkeleton);
         }
       });
+      setFormData({ targetMorphId: '', value: '' });
     } catch (error) {
       setError('Failed to fetch skeleton, process cube, or create morphOp: ' + error.message);
+      setVesperState({ show: true, message: `Send Failed: ${error.message}` });
+    }
+  };
+
+  const handleVesperClose = async (stateKey) => {
+    try {
+      if (stateKey === 'current_skel' && onSendComplete) {
+        const current_skel = await getSkel(userId);
+        onSendComplete(current_skel);
+      }
+      setVesperState({ show: false, message: '' });
+    } catch (error) {
+      console.error('Send: Failed to refresh state via Vesper:', error.message);
     }
   };
 
   return (
-    <Form onSubmit={handleSubmit}>
-      <Form.Group className="mb-3" controlId="formBasicTargetMorphId">
-        <Form.Label>Target Morph ID</Form.Label>
-        <Form.Control
-          type="text"
-          name="targetMorphId"
-          placeholder="Enter target Morph ID"
-          value={formData.targetMorphId}
-          onChange={handleChange}
-          required
-        />
-      </Form.Group>
+    <>
+      <Form onSubmit={handleSubmit}>
+        <Form.Group className="mb-3" controlId="formBasicTargetMorphId">
+          <Form.Label>Target Morph ID</Form.Label>
+          <Form.Control
+            type="text"
+            name="targetMorphId"
+            placeholder="Enter target Morph ID"
+            value={formData.targetMorphId}
+            onChange={handleChange}
+            required
+          />
+        </Form.Group>
 
-      <Form.Group className="mb-3" controlId="formBasicValue">
-        <Form.Label>Value (LSD)</Form.Label>
-        <Form.Control
-          type="number"
-          name="value"
-          placeholder="Enter amount to send"
-          value={formData.value}
-          onChange={handleChange}
-          required
-        />
-      </Form.Group>
+        <Form.Group className="mb-3" controlId="formBasicValue">
+          <Form.Label>Value (LSD)</Form.Label>
+          <Form.Control
+            type="number"
+            name="value"
+            placeholder="Enter amount to send"
+            value={formData.value}
+            onChange={handleChange}
+            required
+          />
+        </Form.Group>
 
-      <Button variant="primary" type="submit">
-        Send LSD
-      </Button>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-    </Form>
+        <Button variant="primary" type="submit">
+          Send LSD
+        </Button>
+        {error && <p style={{ color: 'red' }}>{error}</p>}
+      </Form>
+      <Vesper
+        show={vesperState.show}
+        message={vesperState.message}
+        stateKey="current_skel"
+        refreshState={handleVesperClose}
+        onClose={() => setVesperState({ show: false, message: '' })}
+      />
+    </>
   );
 }
 
 export default Send;
+
+Vesper/
+
+Vesper.jsx
+import React from 'react';
+import Modal from 'react-bootstrap/Modal';
+import Button from 'react-bootstrap/Button';
+
+function Vesper({ show, message, stateKey, refreshState, onClose }) {
+  const handleClose = async () => {
+    try {
+      if (refreshState) {
+        await refreshState(stateKey);
+      }
+      if (onClose) {
+        onClose();
+      }
+    } catch (error) {
+      console.error('Vesper: Failed to refresh state:', error.message);
+    }
+  };
+
+  return (
+    <Modal
+      show={show}
+      onHide={handleClose}
+      backdrop="static"
+      keyboard={false}
+    >
+      <Modal.Header closeButton>
+        <Modal.Title>Action Completed</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        {message || 'Operation completed successfully.'}
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="primary" onClick={handleClose}>
+          Confirm
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
+export default Vesper;
+
+Wallet/
+
+Wallet.jsx
+import React from 'react';
+import Card from 'react-bootstrap/Card';
+import Col from 'react-bootstrap/Col';
+
+function Wallet({ user }) {
+  return (
+    <>
+      <h1 className='navbar-logo'>Hive ID: {user?.username || 'User'}</h1>
+      <Col md={6}>
+        <Card className="mb-4">
+          <Card.Header>Wallet Balance</Card.Header>
+          <Card.Body>
+            <Card.Text>Current Skeleton: {user?.current_skel || 0} LSD</Card.Text>
+            <Card.Text>Morph ID: {user?.morph_id || 'N/A'}</Card.Text>
+          </Card.Body>
+        </Card>
+      </Col>
+    </>
+  );
+}
+
+export default Wallet;
+
+Views/
+
+receiveView.jsx
+import React from 'react';
+import Container from 'react-bootstrap/Container';
+import Receive from '../UI/Receive/Receive.jsx'; // Adjust the import path as necessary
+
+function ReceiveView({ userId, onReceiveComplete }) {
+  return (
+    <Container>
+      <Receive userId={userId} onReceiveComplete={onReceiveComplete} />
+    </Container>
+  );
+}
+
+export default ReceiveView;
+
+sendView.jsx
+import React from 'react';
+import Container from 'react-bootstrap/Container';
+import Send from '../UI/Send/Send.jsx';
+
+function SendView({ userId, onSendComplete }) {
+  return (
+    <Container>
+      <Send userId={userId} onSendComplete={onSendComplete} />
+    </Container>
+  );
+}
+
+export default SendView;
+
+walletView.jsx
+import React from 'react';
+import Wallet from '../UI/Wallet/Wallet.jsx';
+import Container from 'react-bootstrap/Container';
+
+function WalletView({ user }) {
+  return (
+    <Container>
+      <Wallet user={user} />
+    </Container>
+  );
+}
+
+export default WalletView;
 
 App.jsx
 import React, { useState, useEffect } from 'react';
