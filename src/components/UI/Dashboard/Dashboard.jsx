@@ -30,12 +30,12 @@
     console.log('Receive complete, refreshing UI');
     try {
       const current_skel = await getSkel(userData.id);
-      setUserData({ ...userData, current_skel });
+ 
       console.log(`Dashboard: Updated current_skel to ${current_skel}`);
-      setVesperState({ show: true, message: `Processed Successful: ${newSKEL} LSD` });
+     
     } catch (error) {
       console.error('Dashboard: Failed to refresh current_skel:', error.message);
-      setVesperState({ show: true, message: 'Process Failed: ' + error.message });
+    
     }
   };
 
