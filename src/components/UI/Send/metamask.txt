@@ -1,4 +1,6 @@
+```javascript
 import React, { useState } from 'react';
+import { ethers } from 'ethers';
 import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,18 +43,54 @@ function Send({ userId, onSendComplete }) {
         setVesperState({ show: true, message: 'Send Failed: Insufficient LSD balance' });
         return;
       }
+
+      // Initialize ethers provider and signer (MetaMask)
+      if (!window.ethereum) {
+        setError('MetaMask is not installed');
+        setVesperState({ show: true, message: 'Send Failed: MetaMask is not installed' });
+        return;
+      }
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send('eth_requestAccounts', []);
+      const signer = await provider.getSigner();
+
       const morphOp = {
         intent: 'PULL',
         value: value,
         morphId: uuidv4(),
         targetMorphId: formData.targetMorphId,
         userId: userId,
-        signature: 'temp-signature'
+        signature: 'temp-signature' // To be replaced with EIP-712 signature
       };
+
       const sCube = new sCUBE(currentSKEL, userId);
       const { newSkeleton, pom } = await sCube.process(morphOp);
       console.log('Cube Result:', { newSkeleton, pom });
-      
+
+      // Generate EIP-712 signature for POM
+      const domain = {
+        name: 'NeuromProtocol',
+        version: '1',
+        chainId: (await provider.getNetwork()).chainId,
+        verifyingContract: '0x0000000000000000000000000000000000000000' // Replace with deployed Neurom.sol address
+      };
+      const types = {
+        Proof: [
+          { name: 'proofId', type: 'string' },
+          { name: 'userId', type: 'string' },
+          { name: 'skeleton', type: 'uint256' },
+          { name: 'morphIds', type: 'string[]' }
+        ]
+      };
+      const proof = {
+        proofId: pom.proofId || uuidv4(),
+        userId: userId,
+        skeleton: newSkeleton.skeleton,
+        morphIds: pom.morphops.map(op => op.id)
+      };
+      const signature = await signer.signTypedData(domain, types, proof);
+      morphOp.signature = signature;
+
       await create(morphOp, (err, data) => {
         if (err) {
           setError(err);

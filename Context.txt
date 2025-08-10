@@ -654,18 +654,17 @@ function Send({ userId, onSendComplete }) {
         setVesperState({ show: true, message: 'Send Failed: Insufficient LSD balance' });
         return;
       }
-      const sCube = new sCUBE(currentSKEL, userId);
-      const { newSkeleton, pom } = await sCube.process(value);
-      console.log('Cube Result:', { newSkeleton, pom });
       const morphOp = {
-        intent: 'PUSH',
+        intent: 'PULL',
         value: value,
         morphId: uuidv4(),
         targetMorphId: formData.targetMorphId,
         userId: userId,
-        signature: 'temp-signature',
-        id: null
+        signature: 'temp-signature'
       };
+      const sCube = new sCUBE(currentSKEL, userId);
+      const { newSkeleton, pom } = await sCube.process(morphOp);
+      console.log('Cube Result:', { newSkeleton, pom });
       
       await create(morphOp, (err, data) => {
         if (err) {
@@ -1141,12 +1140,19 @@ export class sCUBE {
     this.userId = userId; // Added for update
   }
 
-  async process(sendAmount) {
-    console.log('CUBE ACTIVATE:', { currentSKEL: this.currentSKEL, sendAmount });
-    if (typeof sendAmount !== 'number' || sendAmount <= 0) {
-      throw new Error('sCUBE: Invalid send amount');
+  async process(morphOp) {
+    console.log('CUBE ACTIVATE:', { currentSKEL: this.currentSKEL, morphOp });
+    // Debug validation
+    console.log('Validating morphOp:', {
+      isObject: !!morphOp && typeof morphOp === 'object',
+      hasIntent: morphOp?.intent === 'PULL',
+      isValueInteger: Number.isInteger(Number(morphOp?.value)),
+      isValuePositive: Number(morphOp?.value) > 0
+    });
+    if (!morphOp || typeof morphOp !== 'object' || morphOp.intent !== 'PULL' || !Number.isInteger(Number(morphOp.value)) || Number(morphOp.value) <= 0) {
+      throw new Error('sCUBE: Invalid morphOp format or value');
     }
-    if (sendAmount > this.currentSKEL) {
+    if (Number(morphOp.value) > this.currentSKEL) {
       throw new Error('sCUBE: Send amount exceeds current skeleton balance');
     }
 
@@ -1165,38 +1171,53 @@ export class sCUBE {
       }
     });
 
+    // Capture morphOp details
+    watcher({
+      phase: 'morphops',
+      id: morphOp.morphId || 'unknown',
+      intent: morphOp.intent,
+      value: Number(morphOp.value),
+      unitName: 'u1',
+      symbolBefore: initialState.units[0].currentSymbol
+    });
+
     // Process pull with PullModule
     const pullModule = new PullModule(skeleton);
-    const updatedState = await pullModule.pull(sendAmount);
+    const updatedState = await pullModule.pull(Number(morphOp.value));
 
     // Update currentSKEL with correct conversion using SYMBOL_SEQUENCE
     const newSkeleton = updatedState;
-    this.currentSKEL = parseInt(newSkeleton.units.slice(0, newSkeleton.numberLength).map(u => SYMBOL_SEQUENCE.indexOf(u.currentSymbol)).join('') || '0', 10);
+    this.currentSKEL = parseInt(
+      newSkeleton.units.slice(0, newSkeleton.numberLength)
+        .map(u => SYMBOL_SEQUENCE.indexOf(u.currentSymbol))
+        .join('') || '0',
+      10
+    );
 
     // Capture final phase with watcher using updated currentSKEL
     watcher({
       phase: 'final',
-      skeleton: this.currentSKEL, // Reflects the new value (e.g., 90)
+      skeleton: this.currentSKEL,
       units: newSkeleton.units.map(u => u.currentSymbol),
       length: newSkeleton.numberLength,
-      userId: this.userId, // Pass userId
-      proofId: null // To be generated
+      userId: this.userId,
+      proofId: null
     });
 
     // Update weaver with POM
-    weaver.pom = { 
-      phase: 'final', 
-      proofId: 'temp-proof-id', 
-      skeleton: this.currentSKEL, // Updated skeleton value
+    weaver.pom = {
+      phase: 'final',
+      proofId: 'temp-proof-id',
+      skeleton: this.currentSKEL,
       units: newSkeleton.units.map(u => u.currentSymbol),
       length: newSkeleton.numberLength,
-      userId: this.userId // Pass userId
+      userId: this.userId
     };
 
     // Log the updated skeleton and update server
     console.log('CUBE UPDATED:', { newSkeleton });
     update(
-      { userId: this.userId, newSKEL: this.currentSKEL }, // Use passed userId
+      { userId: this.userId, newSKEL: this.currentSKEL },
       (err, updateData) => {
         if (err) {
           console.error('Skeleton update failed:', err);
